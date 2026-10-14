@@ -71,6 +71,8 @@ export type ShowEntry = {
 export type EntryPatch = {
   status?: LibraryStatus;
   is_favorite?: boolean;
+  rating?: number | null;
+  personal_note?: string;
 };
 
 export type TmdbTvResult = {

@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
 from catalog.models import Movie, Show
@@ -23,7 +24,9 @@ class UserMovie(models.Model):
     status = models.CharField(
         max_length=20, choices=Status.choices, default=Status.WATCHLIST
     )
-    rating = models.PositiveSmallIntegerField(null=True, blank=True)
+    rating = models.FloatField(
+        null=True, blank=True, validators=[MinValueValidator(1), MaxValueValidator(10)]
+    )
     watched_at = models.DateTimeField(null=True, blank=True)
     rewatched_count = models.PositiveSmallIntegerField(default=0)
     personal_note = models.TextField(blank=True)
@@ -56,7 +59,9 @@ class UserShow(models.Model):
     status = models.CharField(
         max_length=20, choices=Status.choices, default=Status.WATCHLIST
     )
-    rating = models.PositiveSmallIntegerField(null=True, blank=True)
+    rating = models.FloatField(
+        null=True, blank=True, validators=[MinValueValidator(1), MaxValueValidator(10)]
+    )
     watched_at = models.DateTimeField(null=True, blank=True)
     rewatched_count = models.PositiveSmallIntegerField(default=0)
     personal_note = models.TextField(blank=True)

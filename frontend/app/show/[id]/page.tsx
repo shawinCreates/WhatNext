@@ -11,6 +11,7 @@ import { go, useInView } from "@/lib/motion";
 import { Row } from "@/components/Row";
 import { Icon } from "@/components/icons";
 import { DetailHero } from "@/components/DetailHero";
+import { RatingNotes } from "@/components/RatingNotes";
 import { ShelfActions } from "@/components/ShelfActions";
 import { TrailerModal } from "@/components/TrailerModal";
 import { ScrollProgress } from "@/components/ScrollProgress";
@@ -184,6 +185,13 @@ export default function ShowDetailPage() {
             }
           />
         }
+      />
+
+      <RatingNotes
+        entry={entry ? { rating: entry.rating, personal_note: entry.personal_note } : null}
+        onUpdate={(patch) => entry && update.mutate({ entryId: entry.id, patch })}
+        busy={update.isPending}
+        error={update.isError ? String(update.error) : null}
       />
 
       {seasonCount > 0 && (

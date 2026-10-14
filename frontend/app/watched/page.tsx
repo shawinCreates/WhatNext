@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type LibraryEntry, type ShowEntry } from "@/lib/api";
 import { removeCached } from "@/lib/collection";
 import { ShelfGrid, type ShelfItem } from "@/components/ShelfGrid";
+import { CountUp } from "@/components/CountUp";
 import {
   CollectionToolbar,
   type MediaFilter,
@@ -106,6 +107,7 @@ export default function WatchedPage() {
     filtered.filter((i) => i.kind === "show"),
     sort,
   );
+  const total = movies.length + shows.length;
   const loading = library.isPending && showsLibrary.isPending;
 
   return (
@@ -114,9 +116,14 @@ export default function WatchedPage() {
         <div>
           <h1 className="font-display text-3xl tracking-wide">Watched</h1>
           <p className="mt-1 text-sm text-[#5b6b84]">
-            {loading
-              ? "Loading…"
-              : `${movies.length + shows.length} titles · ${movies.length} movies · ${shows.length} shows`}
+            {loading ? (
+              "Loading…"
+            ) : (
+              <>
+                <CountUp value={total} /> title{total === 1 ? "" : "s"} · {movies.length} movies ·{" "}
+                {shows.length} shows
+              </>
+            )}
           </p>
         </div>
       </header>

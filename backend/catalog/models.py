@@ -55,6 +55,7 @@ class Show(models.Model):
     seasons = models.PositiveIntegerField(null=True, blank=True)
     episodes = models.PositiveIntegerField(null=True, blank=True)
     is_anime = models.BooleanField(default=False, db_index=True)
+    created_by = models.CharField(max_length=500, blank=True)
     tagline = models.CharField(max_length=500, blank=True)
     vote_average = models.FloatField(null=True, blank=True)
     vote_count = models.PositiveIntegerField(null=True, blank=True)

@@ -5,6 +5,7 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api, posterUrl } from "@/lib/api";
+import { go } from "@/lib/motion";
 import { Icon } from "@/components/icons";
 
 /** Shared import-and-reveal action: open a TMDB id on its detail page. */
@@ -17,10 +18,10 @@ export function useReveal() {
     try {
       if (kind === "movie") {
         const movie = await api.importMovie(tmdbId);
-        router.push(`/movie/${movie.id}`);
+        go(router, `/movie/${movie.id}`);
       } else {
         const show = await api.importShow(tmdbId);
-        router.push(`/show/${show.id}`);
+        go(router, `/show/${show.id}`);
       }
     } finally {
       setPendingKey(null);
@@ -73,7 +74,7 @@ export function QuickSearch({ query }: { query: string }) {
       }
     },
     onSuccess: (href) => {
-      router.push(href);
+      go(router, href);
     },
   });
 

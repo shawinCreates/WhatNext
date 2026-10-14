@@ -13,6 +13,7 @@ import {
   type SearchResult,
   type TmdbTvResult,
 } from "@/lib/api";
+import { go } from "@/lib/motion";
 import { Icon } from "@/components/icons";
 
 const TITLES: Record<string, { heading: string; sub: string }> = {
@@ -112,10 +113,10 @@ function BrowseGrid() {
     try {
       if (kind === "movie") {
         const movie = await api.importMovie(tmdbId);
-        router.push(`/movie/${movie.id}`);
+        go(router, `/movie/${movie.id}`);
       } else {
         const show = await api.importShow(tmdbId);
-        router.push(`/show/${show.id}`);
+        go(router, `/show/${show.id}`);
       }
     } finally {
       setPending(null);
@@ -142,7 +143,7 @@ function BrowseGrid() {
       )}
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-        {items.map((r: SearchResult & TmdbTvResult) => {
+        {items.map((r: SearchResult & TmdbTvResult, i: number) => {
           const title = (kind === "movie" ? r.title : r.name) ?? "Untitled";
           const year = ((kind === "movie" ? r.release_date : r.first_air_date) || "").slice(0, 4);
           const poster = posterUrl(r.poster_path);
@@ -152,7 +153,8 @@ function BrowseGrid() {
               type="button"
               onClick={() => openItem(r.id)}
               disabled={pending === r.id}
-              className="neu p-2.5 pb-3 text-left disabled:opacity-60"
+              className="neu card-lift mount-in p-2.5 pb-3 text-left disabled:opacity-60"
+              style={{ animationDelay: `${Math.min(i % 20, 10) * 40}ms` }}
               aria-label={`View ${title}`}
             >
               <span className="relative block h-56 w-full overflow-hidden rounded-xl sm:h-64">

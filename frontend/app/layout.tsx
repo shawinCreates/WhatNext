@@ -4,6 +4,7 @@ import { Geist, Geist_Mono, Michroma } from "next/font/google";
 import "./globals.css";
 import { Providers } from "./providers";
 import { Navbar } from "@/components/Navbar";
+import { Spotlight } from "@/components/Spotlight";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -38,6 +39,7 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col">
         <Providers>
+          <Spotlight />
           <Suspense>
             <Navbar />
           </Suspense>

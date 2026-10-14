@@ -19,4 +19,5 @@ urlpatterns = [
     path("tmdb/<str:media>/<tmdb_id>/videos", views.title_videos, name="title-videos"),
     path("tmdb/<str:media>/<tmdb_id>/credits", views.title_credits, name="title-credits"),
     path("tmdb/<str:media>/<tmdb_id>/similar", views.title_similar, name="title-similar"),
+    path("tmdb/tv/<int:tmdb_id>/season/<int:season>", views.tv_season, name="tv-season"),
 ]

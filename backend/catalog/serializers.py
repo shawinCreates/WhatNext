@@ -58,6 +58,7 @@ class ShowSerializer(serializers.ModelSerializer):
             "seasons",
             "episodes",
             "is_anime",
+            "created_by",
             "tagline",
             "vote_average",
             "vote_count",

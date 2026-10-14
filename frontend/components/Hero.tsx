@@ -76,7 +76,7 @@ export function Hero({ slides }: { slides: HeroSlide[] }) {
         <div className="hero-scrim absolute inset-0" aria-hidden />
         <div
           key={slide.key}
-          className="relative flex h-full min-h-[440px] max-w-2xl flex-col justify-end gap-4 p-7 pb-24 sm:min-h-[560px] sm:p-12 sm:pb-28"
+          className="hero-text relative flex h-full min-h-[440px] max-w-2xl flex-col justify-end gap-4 p-7 pb-24 sm:min-h-[560px] sm:p-12 sm:pb-28"
         >
           {slide.badge && (
             <p className="neu-inset w-fit px-4 py-1.5 text-[11px] font-semibold tracking-[0.2em] text-[#5b6b84] uppercase">
@@ -139,7 +139,7 @@ export function Hero({ slides }: { slides: HeroSlide[] }) {
                 type="button"
                 onClick={() => go(-1)}
                 aria-label="Previous featured"
-                className="neu p-2"
+                className="neu pressable p-2"
               >
                 <Icon name="chevronLeft" size={16} />
               </button>
@@ -147,7 +147,7 @@ export function Hero({ slides }: { slides: HeroSlide[] }) {
                 type="button"
                 onClick={() => go(1)}
                 aria-label="Next featured"
-                className="neu p-2"
+                className="neu pressable p-2"
               >
                 <Icon name="chevronRight" size={16} />
               </button>

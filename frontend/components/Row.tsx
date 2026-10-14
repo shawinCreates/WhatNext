@@ -4,6 +4,7 @@ import { useRef } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { posterUrl } from "@/lib/api";
+import { useInView } from "@/lib/motion";
 import { Icon, type IconName } from "@/components/icons";
 
 export type RailItem = {
@@ -25,6 +26,7 @@ export function Row({
   empty,
   numbered = false,
   viewAllHref,
+  hoverPlay = false,
 }: {
   title: string;
   subtitle?: string;
@@ -33,13 +35,19 @@ export function Row({
   empty?: string;
   numbered?: boolean;
   viewAllHref?: string;
+  hoverPlay?: boolean;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
   const scrollBy = (dir: number) =>
     scroller.current?.scrollBy({ left: dir * 560, behavior: "smooth" });
+  const { ref: revealRef, visible } = useInView<HTMLElement>();
 
   return (
-    <section aria-label={title}>
+    <section
+      ref={revealRef}
+      aria-label={title}
+      className={`reveal ${visible ? "visible" : ""}`}
+    >
       <div className="mb-3 flex items-end justify-between gap-4">
         <div className="flex items-center gap-3">
           {icon && (
@@ -68,7 +76,7 @@ export function Row({
                   type="button"
                   onClick={() => scrollBy(-1)}
                   aria-label={`Scroll ${title} back`}
-                  className="neu p-2"
+                  className="neu pressable p-2"
                 >
                   <Icon name="chevronLeft" size={16} />
                 </button>
@@ -76,7 +84,7 @@ export function Row({
                   type="button"
                   onClick={() => scrollBy(1)}
                   aria-label={`Scroll ${title} forward`}
-                  className="neu p-2"
+                  className="neu pressable p-2"
                 >
                   <Icon name="chevronRight" size={16} />
                 </button>
@@ -96,6 +104,7 @@ export function Row({
         >
           {items.map((item, i) => {
             const poster = posterUrl(item.posterPath, "w342");
+            const clickable = Boolean(item.href || item.onSelect);
             const visual = (
               <>
                 <div className="relative h-60 w-full flex-shrink-0 overflow-hidden rounded-xl">
@@ -112,6 +121,16 @@ export function Row({
                     <div className="neu-inset flex h-full w-full items-center justify-center p-3 text-center">
                       <Icon name="film" size={22} />
                     </div>
+                  )}
+                  {hoverPlay && clickable && poster && (
+                    <span
+                      aria-hidden
+                      className="absolute inset-0 hidden items-center justify-center bg-[#2d3a4f]/35 opacity-0 transition-opacity duration-300 group-hover:opacity-100 sm:flex"
+                    >
+                      <span className="neu flex !rounded-full p-3.5">
+                        <Icon name="play" size={20} filled />
+                      </span>
+                    </span>
                   )}
                 </div>
                 <p className="truncate text-[13px] font-medium">{item.title}</p>
@@ -132,7 +151,7 @@ export function Row({
             const body = item.href ? (
               <Link
                 href={item.href}
-                className="flex flex-col gap-1.5 rounded-md focus-visible:outline-2 focus-visible:outline-offset-2"
+                className="group flex flex-col gap-1.5 rounded-md focus-visible:outline-2 focus-visible:outline-offset-2"
                 aria-label={item.title}
               >
                 {visual}
@@ -142,7 +161,7 @@ export function Row({
                 type="button"
                 onClick={item.onSelect}
                 disabled={item.selectPending}
-                className="flex w-full flex-col gap-1.5 rounded-md text-left disabled:opacity-60"
+                className="group flex w-full flex-col gap-1.5 rounded-md text-left disabled:opacity-60"
                 aria-label={`View ${item.title}`}
               >
                 {visual}
@@ -151,7 +170,11 @@ export function Row({
               <div className="flex flex-col gap-1.5">{visual}</div>
             );
             return (
-              <div key={item.key} className="flex flex-shrink-0 items-stretch">
+              <div
+                key={item.key}
+                className={`reveal flex flex-shrink-0 items-stretch ${visible ? "visible" : ""}`}
+                style={{ transitionDelay: `${Math.min(i, 8) * 45}ms` }}
+              >
                 {numbered && (
                   <span
                     aria-hidden
@@ -160,7 +183,7 @@ export function Row({
                     {i + 1}
                   </span>
                 )}
-                <div className="neu w-44 flex-shrink-0 p-2.5 pb-3">
+                <div className="neu card-lift w-44 flex-shrink-0 p-2.5 pb-3">
                   {body}
                 </div>
               </div>

@@ -19,7 +19,7 @@ export function TonightPick({ picks }: { picks: TonightPick[] }) {
   return (
     <section className="neu overflow-hidden" aria-label="Tonight's pick" aria-live="polite">
       <div className="flex min-h-[380px] flex-col sm:flex-row">
-        <div className="flex max-w-xl flex-1 flex-col justify-center gap-4 p-7 sm:p-10">
+        <div className="hero-text flex max-w-xl flex-1 flex-col justify-center gap-4 p-7 sm:p-10">
           <p className="neu-inset w-fit px-4 py-1.5 text-[11px] font-semibold tracking-[0.2em] text-[#5b6b84] uppercase">
             {pick.badge ?? "Tonight's pick"}
           </p>

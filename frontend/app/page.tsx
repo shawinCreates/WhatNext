@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { api, backdropUrl } from "@/lib/api";
+import { go } from "@/lib/motion";
 import { Hero, type HeroSlide } from "@/components/Hero";
 import { Row, type RailItem } from "@/components/Row";
 
@@ -15,6 +16,22 @@ const GENRE_RAILS = [
   { id: 35, title: "Comedy", subtitle: "Lighten up" },
   { id: 53, title: "Thriller", subtitle: "Edge of seat" },
 ];
+
+function Ticker({ titles }: { titles: string[] }) {
+  if (titles.length === 0) return null;
+  const loop = [...titles, ...titles];
+  return (
+    <div className="ticker neu overflow-hidden py-2.5" aria-hidden>
+      <div className="ticker-track flex w-max items-center gap-8 pr-8">
+        {loop.map((t, i) => (
+          <span key={i} className="flex items-center gap-8 text-xs font-medium tracking-[0.18em] whitespace-nowrap text-[#5b6b84] uppercase">
+            {t} <span className="text-[#5457d6]">•</span>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function Home() {
   const router = useRouter();
@@ -60,10 +77,10 @@ export default function Home() {
     try {
       if (kind === "movie") {
         const movie = await api.importMovie(tmdbId);
-        router.push(`/movie/${movie.id}`);
+        go(router, `/movie/${movie.id}`);
       } else {
         const show = await api.importShow(tmdbId);
-        router.push(`/show/${show.id}`);
+        go(router, `/show/${show.id}`);
       }
     } finally {
       setPendingKey(null);
@@ -129,6 +146,10 @@ export default function Home() {
           </p>
         </div>
       )}
+
+      <Ticker
+        titles={(trendingMovies.data?.results ?? []).slice(0, 10).map((r) => r.title)}
+      />
 
       <Row
         title="Top 10 movies today"

@@ -38,6 +38,7 @@ export type Show = {
   seasons: number | null;
   episodes: number | null;
   is_anime: boolean;
+  created_by: string;
   tagline: string;
   vote_average: number | null;
   vote_count: number | null;
@@ -108,6 +109,17 @@ export type TmdbCastMember = {
   name: string;
   character?: string;
   profile_path?: string | null;
+};
+
+export type TmdbEpisode = {
+  id: number;
+  episode_number: number;
+  name: string;
+  overview: string;
+  still_path?: string | null;
+  runtime?: number | null;
+  air_date?: string | null;
+  vote_average?: number;
 };
 
 export type SearchResult = {
@@ -198,10 +210,16 @@ export const api = {
   titleVideos: (media: "movie" | "tv", tmdbId: number) =>
     request<{ results: TmdbVideo[] }>(`/tmdb/${media}/${tmdbId}/videos`),
   titleCredits: (media: "movie" | "tv", tmdbId: number) =>
-    request<{ cast: TmdbCastMember[] }>(`/tmdb/${media}/${tmdbId}/credits`),
+    request<{ cast: TmdbCastMember[]; crew: { job?: string; name?: string }[] }>(
+      `/tmdb/${media}/${tmdbId}/credits`,
+    ),
   titleSimilar: (media: "movie" | "tv", tmdbId: number) =>
     request<{ results: (SearchResult & TmdbTvResult)[] }>(
       `/tmdb/${media}/${tmdbId}/similar`,
+    ),
+  tvSeason: (tmdbId: number, season: number) =>
+    request<{ season_number: number; episodes: TmdbEpisode[] }>(
+      `/tmdb/tv/${tmdbId}/season/${season}`,
     ),
 };
 

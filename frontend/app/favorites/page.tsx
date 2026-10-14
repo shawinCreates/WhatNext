@@ -12,6 +12,7 @@ import {
 } from "@/lib/api";
 import { patchCached } from "@/lib/collection";
 import { ShelfGrid, type ShelfItem } from "@/components/ShelfGrid";
+import { CountUp } from "@/components/CountUp";
 import {
   CollectionToolbar,
   type MediaFilter,
@@ -115,7 +116,13 @@ export default function FavoritesPage() {
         <div>
           <h1 className="font-display text-3xl tracking-wide">Favorites</h1>
           <p className="mt-1 text-sm text-[#5b6b84]">
-            {loading ? "Loading…" : `${items.length} loved title${items.length === 1 ? "" : "s"}`}
+            {loading ? (
+              "Loading…"
+            ) : (
+              <>
+                <CountUp value={items.length} /> loved title{items.length === 1 ? "" : "s"}
+              </>
+            )}
           </p>
         </div>
       </header>

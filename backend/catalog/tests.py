@@ -162,3 +162,18 @@ class TitleProxyTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["results"][0]["key"], "abc")
+
+    def test_season_rejects_negative(self):
+        # Django's int converter never routes negatives — 404, not 400.
+        response = APIClient().get("/api/v1/tmdb/tv/1399/season/-1")
+
+        self.assertEqual(response.status_code, 404)
+
+    @patch("catalog.views.season_detail")
+    def test_season_shape(self, mock_season):
+        mock_season.return_value = {"season_number": 1, "episodes": []}
+
+        response = APIClient().get("/api/v1/tmdb/tv/1399/season/1")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["episodes"], [])

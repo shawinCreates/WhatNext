@@ -31,10 +31,14 @@ export function ShelfGrid({ items, empty }: { items: ShelfItem[]; empty: string 
   }
   return (
     <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-      {items.map((item) => {
+      {items.map((item, i) => {
         const poster = posterUrl(item.posterPath);
         return (
-          <div key={item.key} className="neu group p-2.5 pb-3">
+          <div
+            key={item.key}
+            className="neu card-lift group mount-in p-2.5 pb-3"
+            style={{ animationDelay: `${Math.min(i, 10) * 40}ms` }}
+          >
             <Link
               href={item.href}
               className="relative block overflow-hidden rounded-xl"

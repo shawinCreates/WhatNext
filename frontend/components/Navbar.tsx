@@ -50,6 +50,7 @@ export function Navbar() {
   const [open, setOpen] = useState(false);
   const [term, setTerm] = useState("");
   const [debounced, setDebounced] = useState("");
+  const [hidden, setHidden] = useState(false);
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(term.trim()), 300);
@@ -67,6 +68,24 @@ export function Navbar() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  useEffect(() => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    let last = window.scrollY;
+    let ticking = false;
+    const onScroll = () => {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(() => {
+        ticking = false;
+        const y = window.scrollY;
+        setHidden(y > 160 && y > last);
+        last = y;
+      });
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
   const search = (
@@ -107,7 +126,7 @@ export function Navbar() {
     <header className="sticky top-0 z-40 px-4 pt-4 sm:px-6">
       <nav
         aria-label="Primary"
-        className="neu mx-auto w-full max-w-6xl !rounded-3xl px-3 py-2 sm:px-5 md:!rounded-full"
+        className={`neu nav-bar mx-auto w-full max-w-6xl !rounded-3xl px-3 py-2 sm:px-5 md:!rounded-full ${hidden && !open ? "nav-hide" : ""}`}
       >
         <div className="relative flex items-center justify-between gap-2">
           <Link href="/" className="flex flex-shrink-0 items-center gap-2" aria-label="WhatNext home">

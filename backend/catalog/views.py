@@ -15,6 +15,7 @@ from .services import (
     movie_section,
     search_movies,
     search_shows,
+    season_detail,
     show_section,
     similar,
     trending_movies,
@@ -212,3 +213,23 @@ def title_credits(request, media, tmdb_id):
 @api_view(["GET"])
 def title_similar(request, media, tmdb_id):
     return _tmdb_detail_proxy(request, media, tmdb_id, lambda m, i: {"results": similar(m, i)})
+
+
+@api_view(["GET"])
+def tv_season(request, tmdb_id, season):
+    try:
+        tmdb_id, season = int(tmdb_id), int(season)
+    except (TypeError, ValueError):
+        return Response(
+            {"detail": "ids must be integers"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if season < 0:
+        return Response(
+            {"detail": "season must be 0 or greater"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    try:
+        return Response(season_detail(tmdb_id, season))
+    except TMDBError as exc:
+        return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)

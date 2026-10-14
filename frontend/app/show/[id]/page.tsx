@@ -5,11 +5,15 @@ import Link from "next/link";
 import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, backdropUrl, posterUrl, type EntryPatch, type LibraryStatus } from "@/lib/api";
+import { api, type EntryPatch, type LibraryStatus } from "@/lib/api";
 import { patchCached, removeCached } from "@/lib/collection";
+import { go, useInView } from "@/lib/motion";
 import { Row } from "@/components/Row";
 import { Icon } from "@/components/icons";
-import { EntryControls } from "@/components/EntryControls";
+import { DetailHero } from "@/components/DetailHero";
+import { ShelfActions } from "@/components/ShelfActions";
+import { TrailerModal } from "@/components/TrailerModal";
+import { ScrollProgress } from "@/components/ScrollProgress";
 
 export default function ShowDetailPage() {
   const params = useParams<{ id: string }>();
@@ -19,6 +23,8 @@ export default function ShowDetailPage() {
   const validId = Number.isInteger(id) && id > 0;
   const [trailerOpen, setTrailerOpen] = useState(false);
   const [pending, setPending] = useState<number | null>(null);
+  const [season, setSeason] = useState(1);
+  const castReveal = useInView<HTMLElement>();
 
   const show = useQuery({
     queryKey: ["show", id],
@@ -64,6 +70,12 @@ export default function ShowDetailPage() {
     enabled: !!tmdbId,
     staleTime: 1000 * 60 * 30,
   });
+  const seasonData = useQuery({
+    queryKey: ["season", tmdbId, season],
+    queryFn: () => api.tvSeason(tmdbId!, season),
+    enabled: !!tmdbId,
+    staleTime: 1000 * 60 * 60,
+  });
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -77,7 +89,7 @@ export default function ShowDetailPage() {
     setPending(similarTmdbId);
     try {
       const imported = await api.importShow(similarTmdbId);
-      router.push(`/show/${imported.id}`);
+      go(router, `/show/${imported.id}`);
     } finally {
       setPending(null);
     }
@@ -116,8 +128,6 @@ export default function ShowDetailPage() {
 
   const data = show.data;
   const entry = library.data?.find((item) => item.show.id === data.id);
-  const backdrop = backdropUrl(data.backdrop_path);
-  const poster = posterUrl(data.poster_path);
   const trailer = (videos.data?.results ?? []).find(
     (v) => v.site === "YouTube" && (v.type === "Trailer" || v.type === "Teaser"),
   );
@@ -129,136 +139,127 @@ export default function ShowDetailPage() {
       ? {
           icon: "star" as const,
           label: "TMDB rating",
-          value: `★ ${data.vote_average.toFixed(1)}${data.vote_count ? ` (${data.vote_count.toLocaleString()} votes)` : ""}`,
+          value: `★ ${data.vote_average.toFixed(1)}${data.vote_count ? ` (${data.vote_count.toLocaleString()})` : ""}`,
         }
       : null,
-  ].filter(Boolean);
+  ].filter((f): f is { icon: "calendar" | "film" | "play" | "star"; label: string; value: string } => Boolean(f));
+
+  const seasonCount = data.seasons ?? 0;
+  const episodes = seasonData.data?.episodes ?? [];
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 px-6 py-8">
+    <div className="relative mx-auto flex w-full max-w-6xl flex-1 flex-col gap-10 px-6 py-8">
+      <ScrollProgress />
       <Link href="/shows" className="flex w-fit items-center gap-1.5 text-sm text-[#5b6b84] hover:underline">
         <Icon name="arrowLeft" size={15} /> Back to shows
       </Link>
 
-      <section className="neu overflow-hidden" aria-label={data.name}>
-        <div className="relative min-h-[320px] sm:min-h-[420px]">
-          {backdrop && (
-            <Image
-              src={backdrop}
-              alt=""
-              fill
-              priority
-              sizes="(max-width: 1024px) 100vw, 1024px"
-              className="object-cover"
-            />
-          )}
-          <div className="hero-scrim absolute inset-0" aria-hidden />
-          <div className="hero-scrim-bottom absolute inset-x-0 bottom-0 h-20" aria-hidden />
-          {trailer && (
-            <button
-              type="button"
-              onClick={() => setTrailerOpen(true)}
-              aria-label={`Play trailer for ${data.name}`}
-              className="neu absolute top-1/2 left-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center gap-2 !rounded-full px-6 py-3 text-sm font-semibold"
-            >
-              <Icon name="play" size={18} filled /> Trailer
-            </button>
-          )}
-        </div>
-
-        <div className="relative flex flex-col gap-5 p-6 sm:flex-row sm:gap-7 sm:p-8">
-          {poster ? (
-            <Image
-              src={poster}
-              alt={data.name}
-              width={220}
-              height={330}
-              className="-mt-24 w-36 flex-shrink-0 rounded-xl object-cover shadow-lg sm:-mt-32 sm:w-52"
-            />
-          ) : (
-            <div className="neu-inset -mt-24 flex h-52 w-36 flex-shrink-0 items-center justify-center rounded-xl sm:-mt-32 sm:h-72 sm:w-52" aria-hidden>
-              <Icon name="tv" size={28} />
-            </div>
-          )}
-          <div className="flex min-w-0 flex-1 flex-col justify-center sm:pt-2">
-            {data.is_anime && (
-              <p className="mb-2 flex w-fit items-center gap-1.5 rounded-full bg-[#5457d6]/10 px-3 py-1 text-[11px] font-semibold tracking-wide text-[#5457d6] uppercase">
-                <Icon name="sparkles" size={12} /> Anime
-              </p>
-            )}
-            <h1 className="font-display text-3xl leading-tight tracking-wide text-balance sm:text-5xl">
-              {data.name}
-            </h1>
-            {data.tagline && (
-              <p className="mt-2 text-sm text-[#5b6b84] italic">“{data.tagline}”</p>
-            )}
-            <p className="mt-2 text-sm font-medium text-[#5b6b84]">
-              {[
-                data.release_year ? String(data.release_year) : null,
-                data.seasons ? `${data.seasons} season${data.seasons === 1 ? "" : "s"}` : null,
-              ]
-                .filter(Boolean)
-                .join("  •  ")}
-            </p>
-            {data.genres.length > 0 && (
-              <ul className="mt-3 flex flex-wrap gap-2" aria-label="Genres">
-                {data.genres.map((genre) => (
-                  <li key={genre.id} className="neu-inset px-3 py-1 text-xs font-medium">
-                    {genre.name}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        </div>
-      </section>
-
-      <EntryControls
-        entry={
-          entry
-            ? { status: entry.status, is_favorite: entry.is_favorite }
-            : null
+      <DetailHero
+        title={data.name}
+        backdropPath={data.backdrop_path}
+        kicker={data.is_anime ? "Anime" : undefined}
+        genres={data.genres}
+        overview={data.overview}
+        metaYear={data.release_year ? String(data.release_year) : undefined}
+        metaBadge={data.seasons ? `${data.seasons} season${data.seasons === 1 ? "" : "s"}` : undefined}
+        vote={
+          data.vote_average != null
+            ? `${data.vote_average.toFixed(1)}${data.vote_count ? ` (${data.vote_count.toLocaleString()})` : ""}`
+            : undefined
         }
-        onAdd={(status) => add.mutate(status)}
-        onUpdate={(patch) => entry && update.mutate({ entryId: entry.id, patch })}
-        onRemove={() => entry && remove.mutate(entry.id)}
-        busy={{ add: add.isPending, update: update.isPending, remove: remove.isPending }}
-        error={
-          add.isError || update.isError || remove.isError
-            ? String(add.error ?? update.error ?? remove.error)
-            : null
+        creator={data.created_by ? { label: "Creator", value: data.created_by } : undefined}
+        facts={facts}
+        onTrailer={trailer ? () => setTrailerOpen(true) : undefined}
+        shelf={
+          <ShelfActions
+            entry={entry ? { status: entry.status, is_favorite: entry.is_favorite } : null}
+            onAdd={(status) => add.mutate(status)}
+            onUpdate={(patch) => entry && update.mutate({ entryId: entry.id, patch })}
+            onRemove={() => entry && remove.mutate(entry.id)}
+            busy={{ add: add.isPending, update: update.isPending, remove: remove.isPending }}
+            error={
+              add.isError || update.isError || remove.isError
+                ? String(add.error ?? update.error ?? remove.error)
+                : null
+            }
+          />
         }
       />
 
-      {data.overview && (
-        <section className="neu p-6" aria-label="Story">
-          <h2 className="text-sm font-semibold tracking-wide uppercase">Story</h2>
-          <p className="mt-2 max-w-3xl text-sm leading-relaxed">{data.overview}</p>
-        </section>
-      )}
-
-      {facts.length > 0 && (
-        <section className="neu grid grid-cols-2 gap-3 p-5 sm:grid-cols-4" aria-label="Facts">
-          {facts.map((fact) =>
-            fact ? (
-              <div key={fact.label} className="neu-inset flex items-center gap-3 px-4 py-3">
-                <Icon name={fact.icon} size={18} />
-                <span>
-                  <span className="block text-[11px] text-[#5b6b84]">{fact.label}</span>
-                  <span className="block truncate text-sm font-medium">{fact.value}</span>
-                </span>
-              </div>
-            ) : null,
+      {seasonCount > 0 && (
+        <section aria-label="Episodes">
+          <div className="mb-3 flex items-center justify-between gap-4">
+            <h2 className="text-lg font-semibold tracking-tight">Episodes</h2>
+            <select
+              value={season}
+              onChange={(e) => setSeason(Number(e.target.value))}
+              aria-label="Select season"
+              className="neu-inset px-3 py-2 text-sm outline-none"
+            >
+              {Array.from({ length: seasonCount }, (_, i) => i + 1).map((n) => (
+                <option key={n} value={n}>
+                  Season {n}
+                </option>
+              ))}
+            </select>
+          </div>
+          {seasonData.isPending ? (
+            <div className="neu-inset shimmer px-6 py-8" aria-busy>
+              <p className="text-sm text-[#5b6b84]">Loading episodes…</p>
+            </div>
+          ) : seasonData.isError ? (
+            <p className="text-sm text-[#5b6b84]">Episodes unavailable for this season.</p>
+          ) : (
+            <div className="no-scrollbar -mx-1 flex gap-5 overflow-x-auto px-1 pt-2 pb-4">
+              {episodes.map((ep) => (
+                <article key={ep.id} className="neu card-lift w-72 flex-shrink-0 p-2.5 pb-3 sm:w-80">
+                  <div className="relative aspect-video w-full overflow-hidden rounded-xl">
+                    {ep.still_path ? (
+                      <Image
+                        src={`https://image.tmdb.org/t/p/w500${ep.still_path}`}
+                        alt={ep.name}
+                        fill
+                        sizes="320px"
+                        className="object-cover"
+                        loading="lazy"
+                      />
+                    ) : (
+                      <div className="neu-inset flex h-full w-full items-center justify-center" aria-hidden>
+                        <Icon name="play" size={20} />
+                      </div>
+                    )}
+                    <span className="neu-inset absolute top-2 left-2 px-2.5 py-1 text-[11px] font-semibold">
+                      E{ep.episode_number}
+                    </span>
+                    {ep.runtime ? (
+                      <span className="neu-inset absolute right-2 bottom-2 px-2.5 py-1 text-[11px] font-medium">
+                        {ep.runtime}m
+                      </span>
+                    ) : null}
+                  </div>
+                  <h3 className="mt-2 truncate px-1 text-sm font-semibold">{ep.name}</h3>
+                  {ep.overview && (
+                    <p className="line-clamp-2 px-1 text-xs leading-relaxed text-[#5b6b84]">
+                      {ep.overview}
+                    </p>
+                  )}
+                </article>
+              ))}
+            </div>
           )}
         </section>
       )}
 
       {(credits.data?.cast ?? []).length > 0 && (
-        <section aria-label="Cast">
+        <section
+          ref={castReveal.ref}
+          className={`reveal ${castReveal.visible ? "visible" : ""}`}
+          aria-label="Cast"
+        >
           <h2 className="mb-3 text-lg font-semibold tracking-tight">Cast</h2>
           <div className="no-scrollbar -mx-1 flex gap-4 overflow-x-auto px-1 pt-2 pb-4">
             {(credits.data?.cast ?? []).slice(0, 12).map((person) => (
-              <div key={person.id} className="neu w-28 flex-shrink-0 p-2 pb-3 text-center">
+              <div key={person.id} className="neu card-lift w-28 flex-shrink-0 p-2 pb-3 text-center">
                 {person.profile_path ? (
                   <Image
                     src={`https://image.tmdb.org/t/p/w185${person.profile_path}`}
@@ -287,6 +288,7 @@ export default function ShowDetailPage() {
         title="You may also like"
         subtitle="Similar series"
         icon="sparkles"
+        hoverPlay
         items={(similar.data?.results ?? []).slice(0, 12).map((r) => ({
           key: `sim-${r.id}`,
           title: r.name || r.title || "Untitled",
@@ -299,39 +301,12 @@ export default function ShowDetailPage() {
       />
 
       {trailerOpen && trailer && (
-        <div
-          role="dialog"
-          aria-modal
-          aria-label={`Trailer for ${data.name}`}
-          onClick={() => setTrailerOpen(false)}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-[#2d3a4f]/60 p-4"
-        >
-          <div
-            className="neu w-full max-w-3xl overflow-hidden p-3"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="mb-2 flex items-center justify-between px-1">
-              <p className="truncate text-sm font-medium">{trailer.name}</p>
-              <button
-                type="button"
-                onClick={() => setTrailerOpen(false)}
-                aria-label="Close trailer"
-                className="neu p-1.5"
-              >
-                <Icon name="x" size={15} />
-              </button>
-            </div>
-            <div className="aspect-video w-full overflow-hidden rounded-xl">
-              <iframe
-                src={`https://www.youtube.com/embed/${trailer.key}?autoplay=1&rel=0`}
-                title={trailer.name}
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                allowFullScreen
-                className="h-full w-full"
-              />
-            </div>
-          </div>
-        </div>
+        <TrailerModal
+          title={data.name}
+          videoName={trailer.name}
+          videoKey={trailer.key}
+          onClose={() => setTrailerOpen(false)}
+        />
       )}
     </div>
   );

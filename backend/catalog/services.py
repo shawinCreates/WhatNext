@@ -205,6 +205,11 @@ def similar(media, tmdb_id, page=1):
     return data.get("results", [])
 
 
+def season_detail(tmdb_id, season):
+    """One TV season with its episodes (stills, runtimes, overviews)."""
+    return _get(f"/tv/{tmdb_id}/season/{season}")
+
+
 def _sync_genres(payload):
     genres = []
     for genre in payload.get("genres", []):
@@ -241,6 +246,9 @@ def upsert_show(payload):
             "seasons": payload.get("number_of_seasons"),
             "episodes": payload.get("number_of_episodes"),
             "is_anime": is_anime,
+            "created_by": ", ".join(
+                c.get("name", "") for c in payload.get("created_by", []) if c.get("name")
+            )[:500],
             "tagline": payload.get("tagline") or "",
             "vote_average": payload.get("vote_average"),
             "vote_count": payload.get("vote_count"),

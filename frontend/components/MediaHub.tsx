@@ -11,6 +11,7 @@ import {
   type SearchResult,
   type TmdbTvResult,
 } from "@/lib/api";
+import { go } from "@/lib/motion";
 import { Hero, type HeroSlide } from "@/components/Hero";
 import { Row, type RailItem } from "@/components/Row";
 
@@ -78,10 +79,10 @@ export function MediaHub({
     try {
       if (isMovie) {
         const movie = await api.importMovie(tmdbId);
-        router.push(`/movie/${movie.id}`);
+        go(router, `/movie/${movie.id}`);
       } else {
         const show = await api.importShow(tmdbId);
-        router.push(`/show/${show.id}`);
+        go(router, `/show/${show.id}`);
       }
     } finally {
       setPending(null);

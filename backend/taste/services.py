@@ -1,0 +1,183 @@
+"""Deterministic taste profile (Phase 3 Slice 1): ratings x heuristic vectors.
+
+No ML, no external services. LLM extraction and embeddings refine
+these weights later; the loop (backfill -> build -> serve) stays the same.
+"""
+
+import math
+
+from django.utils import timezone
+
+from catalog.models import Movie, Show
+from library.models import UserMovie, UserShow
+
+from .models import MovieFeature, UserPreference
+from .taxonomy import FEATURES, GENRE_FEATURES, rating_weight
+
+HEURISTIC_CONFIDENCE = 0.5
+RECENCY_HALFLIFE_DAYS = 730
+STRONG_EVIDENCE = 3
+STRONG_WEIGHT = 0.75
+
+
+def _recency(age_days):
+    return math.exp(-math.log(2) * max(age_days, 0) / RECENCY_HALFLIFE_DAYS)
+
+
+def _entry_multiplier(entry):
+    mult = 1.2 if entry.is_favorite else 1.0
+    return mult + min(entry.rewatched_count * 0.1, 0.3)
+
+
+def backfill_features():
+    """(Re)create heuristic MovieFeatures for every catalog title with genres."""
+    created = updated = 0
+    for model, field in ((Movie, "movie"), (Show, "show")):
+        for title in model.objects.prefetch_related("genres"):
+            priors = {}
+            for genre in title.genres.all():
+                for key, value in GENRE_FEATURES.get(genre.name, {}).items():
+                    priors[key] = max(priors.get(key, 0), value)
+            for key, value in priors.items():
+                _, was_created = MovieFeature.objects.update_or_create(
+                    **{field: title, "feature_key": key},
+                    defaults={
+                        "value": value,
+                        "confidence": HEURISTIC_CONFIDENCE,
+                        "source": "heuristic",
+                    },
+                )
+                created += was_created
+                updated += not was_created
+    return created, updated
+
+
+def _contributions(user):
+    """Per-feature signed contributions with provenance for one user."""
+    now = timezone.now()
+    movie_entries = list(
+        UserMovie.objects.filter(user=user, rating__isnull=False).select_related(
+            "movie"
+        )
+    )
+    show_entries = list(
+        UserShow.objects.filter(user=user, rating__isnull=False).select_related("show")
+    )
+    out = []
+    for entry in movie_entries:
+        out.extend(_entry_items(entry, entry.movie, True, now))
+    for entry in show_entries:
+        out.extend(_entry_items(entry, entry.show, False, now))
+    return out
+
+
+def _entry_items(entry, title, is_movie, now):
+    feats = MovieFeature.objects.filter(
+        **({"movie": title} if is_movie else {"show": title})
+    )
+    if not feats:
+        return []
+    age = (now - entry.updated_at).days
+    scale = rating_weight(entry.rating) * _entry_multiplier(entry) * _recency(age)
+    year = title.release_year
+    name = getattr(title, "title", None) or title.name
+    return [
+        {
+            "feature": feat.feature_key,
+            "contribution": scale * feat.value * feat.confidence,
+            "title": name,
+            "year": year,
+            "rating": entry.rating,
+        }
+        for feat in feats
+    ]
+
+
+def build_profile(user):
+    """Rebuild all ratings-sourced UserPreferences for one user."""
+    contribs = _contributions(user)
+    UserPreference.objects.filter(user=user, source="ratings").delete()
+    totals = {}
+    for item in contribs:
+        agg = totals.setdefault(
+            item["feature"], {"total": 0.0, "titles": set()}
+        )
+        agg["total"] += item["contribution"]
+        agg["titles"].add(item["title"])
+    prefs = []
+    for key, agg in totals.items():
+        if key not in FEATURES or agg["total"] == 0:
+            continue
+        evidence = len(agg["titles"])
+        prefs.append(
+            UserPreference(
+                user=user,
+                feature_key=key,
+                polarity=1 if agg["total"] >= 0 else -1,
+                weight=round(abs(agg["total"]), 4),
+                confidence=round(min(1.0, evidence / 5), 4),
+                source="ratings",
+            )
+        )
+    UserPreference.objects.bulk_create(prefs)
+    return len(prefs)
+
+
+def _strength(evidence, weight):
+    if evidence >= STRONG_EVIDENCE and weight >= STRONG_WEIGHT:
+        return "strong"
+    return "emerging"
+
+
+def profile_payload(user):
+    """Dashboard-ready profile with top supporting titles per feature."""
+    if not UserPreference.objects.filter(user=user).exists():
+        backfill_features()
+        build_profile(user)
+    contribs = _contributions(user)
+    by_feature = {}
+    for item in contribs:
+        by_feature.setdefault(item["feature"], []).append(item)
+    groups = {"positive": [], "negative": []}
+    prefs = UserPreference.objects.filter(user=user).select_related("user")
+    for pref in prefs:
+        if pref.feature_key not in FEATURES:
+            continue
+        items = sorted(
+            by_feature.get(pref.feature_key, []),
+            key=lambda i: i["contribution"],
+            reverse=pref.polarity > 0,
+        )
+        seen, titles = set(), []
+        for item in items:
+            if item["title"] not in seen:
+                seen.add(item["title"])
+                titles.append(
+                    {
+                        "title": item["title"],
+                        "year": item["year"],
+                        "rating": item["rating"],
+                    }
+                )
+            if len(titles) == 3:
+                break
+        _, label, description = FEATURES[pref.feature_key]
+        evidence = len({i["title"] for i in by_feature.get(pref.feature_key, [])})
+        groups["positive" if pref.polarity > 0 else "negative"].append(
+            {
+                "feature": pref.feature_key,
+                "label": label,
+                "description": description,
+                "weight": round(pref.weight if pref.polarity > 0 else -pref.weight, 4),
+                "evidence": evidence,
+                "strength": _strength(evidence, pref.weight),
+                "titles": titles,
+            }
+        )
+    for key in groups:
+        groups[key].sort(key=lambda p: abs(p["weight"]), reverse=True)
+    return {
+        "positive": groups["positive"],
+        "negative": groups["negative"],
+        "generated_at": timezone.now().isoformat(),
+    }

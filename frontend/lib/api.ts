@@ -68,6 +68,22 @@ export type ShowEntry = {
   updated_at: string;
 };
 
+export type TasteFeature = {
+  feature: string;
+  label: string;
+  description: string;
+  weight: number;
+  evidence: number;
+  strength: "strong" | "emerging";
+  titles: { title: string; year: number | null; rating: number | null }[];
+};
+
+export type TasteProfile = {
+  positive: TasteFeature[];
+  negative: TasteFeature[];
+  generated_at: string | null;
+};
+
 export type EntryPatch = {
   status?: LibraryStatus;
   is_favorite?: boolean;
@@ -209,6 +225,7 @@ export const api = {
   deleteShowEntry: (id: number) =>
     request<void>(`/library/shows/items/${id}`, { method: "DELETE" }),
   awardedMovies: () => request<Movie[]>("/movies/browse?section=awarded"),
+  tasteProfile: () => request<TasteProfile>("/taste/profile"),
   titleVideos: (media: "movie" | "tv", tmdbId: number) =>
     request<{ results: TmdbVideo[] }>(`/tmdb/${media}/${tmdbId}/videos`),
   titleCredits: (media: "movie" | "tv", tmdbId: number) =>

@@ -50,6 +50,37 @@ export function ShelfActions({
   }
 
   const watched = entry.status === "WATCHED";
+  const rejected = entry.status === "REJECTED";
+  if (rejected) {
+    return (
+      <div>
+        <div className="flex items-center gap-2.5">
+          <button
+            onClick={() => onUpdate({ status: "WATCHLIST" })}
+            disabled={busy.update}
+            title="Undo rejection"
+            aria-label="Undo rejection"
+            className="neu pressable px-4 py-2 text-xs font-medium disabled:opacity-50"
+          >
+            Undo reject
+          </button>
+          <button
+            onClick={onRemove}
+            disabled={busy.remove}
+            title="Remove from shelf"
+            aria-label="Remove from shelf"
+            className={`neu ${circle} text-[#5b6b84] hover:text-red-600`}
+          >
+            <Icon name="x" size={16} />
+          </button>
+        </div>
+        <p className="mt-2 text-xs text-[#5b6b84]">
+          Rejected — hidden from recommendations.
+        </p>
+        {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+      </div>
+    );
+  }
   return (
     <div>
       <div className="flex items-center gap-2.5">
@@ -73,6 +104,15 @@ export function ShelfActions({
           className={entry.is_favorite ? `neu-inset ${circle} text-[#5457d6]` : `neu ${circle}`}
         >
           <Icon name="star" size={17} filled={entry.is_favorite} className="animate-pop" />
+        </button>
+        <button
+          onClick={() => onUpdate({ status: "REJECTED" })}
+          disabled={busy.update}
+          title="Not for me — hide from recommendations"
+          aria-label="Not for me — hide from recommendations"
+          className="neu pressable px-4 py-2 text-xs font-medium text-[#5b6b84] hover:text-red-600 disabled:opacity-50"
+        >
+          Not for me
         </button>
         <button
           onClick={onRemove}

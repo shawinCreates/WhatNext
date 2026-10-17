@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import {
   api,
@@ -9,6 +10,7 @@ import {
   type SearchResult,
   type TmdbTvResult,
 } from "@/lib/api";
+import { go } from "@/lib/motion";
 import { QuickSearch, useReveal } from "@/components/QuickSearch";
 import { TonightPick, type TonightPick as Pick } from "@/components/TonightPick";
 import { Row, type RailItem } from "@/components/Row";
@@ -38,6 +40,13 @@ export default function TonightPage() {
   const [term, setTerm] = useState("");
   const [debounced, setDebounced] = useState("");
   const { open, pendingKey } = useReveal();
+  const router = useRouter();
+
+  const reco = useQuery({
+    queryKey: ["recommendations"],
+    queryFn: () => api.recommendations("all", 10),
+    staleTime: HALF_HOUR,
+  });
 
   const topMovies = useQuery({
     queryKey: ["browse", "movie", "top_rated"],
@@ -71,6 +80,30 @@ export default function TonightPage() {
 
   const voteOf = (item: TmdbItem) =>
     typeof item.vote_average === "number" ? ` · ★ ${item.vote_average.toFixed(1)}` : "";
+
+  const forYou: Pick[] = (reco.data?.results ?? [])
+    .filter((r) => r.personalized && r.backdrop_path)
+    .slice(0, 5)
+    .map((r) => {
+      const labels = r.reasons.map((x) => x.label.toLowerCase()).slice(0, 3);
+      const liked = r.similar_liked.map((x) => x.title).slice(0, 2);
+      const reason =
+        labels.length > 0
+          ? `Because you like ${labels.join(", ")}${liked.length > 0 ? ` — similar to ${liked.join(", ")}` : ""}.`
+          : "Picked from your shelf patterns.";
+      return {
+        key: `reco-${r.kind}-${r.id}`,
+        title: r.title,
+        meta: [r.year ? String(r.year) : null, r.kind === "movie" ? "Movie" : "Series"]
+          .filter(Boolean)
+          .join("  •  "),
+        overview: r.overview,
+        backdrop: backdropUrl(r.backdrop_path),
+        badge: "For you",
+        reason,
+        onOpen: () => go(router, r.kind === "movie" ? `/movie/${r.id}` : `/show/${r.id}`),
+      };
+    });
 
   const picks: Pick[] = [
     ...(topMovies.data?.results ?? []).slice(0, 3).map((item) => ({ kind: "movie" as const, item })),
@@ -153,6 +186,8 @@ export default function TonightPage() {
           ))}
         </div>
       </section>
+
+      {forYou.length > 0 && <TonightPick picks={forYou} />}
 
       {loading ? (
         <div className="neu-inset shimmer px-6 py-16" aria-busy>

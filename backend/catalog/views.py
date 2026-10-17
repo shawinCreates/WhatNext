@@ -46,6 +46,9 @@ def import_movie(request):
     except TMDBError as exc:
         return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
     movie = upsert_movie(payload)
+    from taste.services import backfill_title
+
+    backfill_title(movie=movie)
     return Response(MovieSerializer(movie).data, status=status.HTTP_201_CREATED)
 
 
@@ -163,6 +166,9 @@ def import_show(request):
     except TMDBError as exc:
         return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
     show = upsert_show(payload)
+    from taste.services import backfill_title
+
+    backfill_title(show=show)
     return Response(ShowSerializer(show).data, status=status.HTTP_201_CREATED)
 
 

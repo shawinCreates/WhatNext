@@ -34,22 +34,28 @@ export default function ShowDetailPage() {
   });
   const library = useQuery({ queryKey: ["shows-library"], queryFn: api.showsLibrary });
 
+  const refreshTaste = () => {
+    queryClient.invalidateQueries({ queryKey: ["shows-library"] });
+    queryClient.invalidateQueries({ queryKey: ["taste-profile"] });
+    queryClient.invalidateQueries({ queryKey: ["recommendations"] });
+  };
+
   const add = useMutation({
     mutationFn: (status: LibraryStatus) => api.addShowToLibrary(id, status),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["shows-library"] }),
+    onSuccess: refreshTaste,
   });
   const update = useMutation({
     mutationFn: ({ entryId, patch }: { entryId: number; patch: EntryPatch }) =>
       api.updateShowEntry(entryId, patch),
     onMutate: ({ entryId, patch }) => patchCached(queryClient, ["shows-library"], entryId, patch),
     onError: (_e, _v, rollback) => rollback?.(),
-    onSettled: () => queryClient.invalidateQueries({ queryKey: ["shows-library"] }),
+    onSettled: refreshTaste,
   });
   const remove = useMutation({
     mutationFn: (entryId: number) => api.deleteShowEntry(entryId),
     onMutate: (entryId) => removeCached(queryClient, ["shows-library"], entryId),
     onError: (_e, _v, rollback) => rollback?.(),
-    onSettled: () => queryClient.invalidateQueries({ queryKey: ["shows-library"] }),
+    onSettled: refreshTaste,
   });
 
   const tmdbId = show.data?.tmdb_id;

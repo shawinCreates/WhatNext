@@ -29,26 +29,44 @@ def _entry_multiplier(entry):
     return mult + min(entry.rewatched_count * 0.1, 0.3)
 
 
+def _priors_for_genres(genres):
+    priors = {}
+    for genre in genres:
+        for key, value in GENRE_FEATURES.get(genre.name, {}).items():
+            priors[key] = max(priors.get(key, 0), value)
+    return priors
+
+
+def backfill_title(movie=None, show=None):
+    """(Re)create heuristic MovieFeatures for one catalog title."""
+    if bool(movie) == bool(show):
+        raise ValueError("pass exactly one of movie, show")
+    title = movie or show
+    field = "movie" if movie else "show"
+    priors = _priors_for_genres(title.genres.all())
+    created = updated = 0
+    for key, value in priors.items():
+        _, was_created = MovieFeature.objects.update_or_create(
+            **{field: title, "feature_key": key},
+            defaults={
+                "value": value,
+                "confidence": HEURISTIC_CONFIDENCE,
+                "source": "heuristic",
+            },
+        )
+        created += was_created
+        updated += not was_created
+    return created, updated
+
+
 def backfill_features():
     """(Re)create heuristic MovieFeatures for every catalog title with genres."""
     created = updated = 0
-    for model, field in ((Movie, "movie"), (Show, "show")):
+    for model, kw in ((Movie, "movie"), (Show, "show")):
         for title in model.objects.prefetch_related("genres"):
-            priors = {}
-            for genre in title.genres.all():
-                for key, value in GENRE_FEATURES.get(genre.name, {}).items():
-                    priors[key] = max(priors.get(key, 0), value)
-            for key, value in priors.items():
-                _, was_created = MovieFeature.objects.update_or_create(
-                    **{field: title, "feature_key": key},
-                    defaults={
-                        "value": value,
-                        "confidence": HEURISTIC_CONFIDENCE,
-                        "source": "heuristic",
-                    },
-                )
-                created += was_created
-                updated += not was_created
+            c, u = backfill_title(**{kw: title})
+            created += c
+            updated += u
     return created, updated
 
 

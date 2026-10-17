@@ -34,22 +34,28 @@ export default function MovieDetailPage() {
   });
   const library = useQuery({ queryKey: ["library"], queryFn: api.library });
 
+  const refreshTaste = () => {
+    queryClient.invalidateQueries({ queryKey: ["library"] });
+    queryClient.invalidateQueries({ queryKey: ["taste-profile"] });
+    queryClient.invalidateQueries({ queryKey: ["recommendations"] });
+  };
+
   const add = useMutation({
     mutationFn: (status: LibraryStatus) => api.addToLibrary(id, status),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["library"] }),
+    onSuccess: refreshTaste,
   });
   const update = useMutation({
     mutationFn: ({ entryId, patch }: { entryId: number; patch: EntryPatch }) =>
       api.updateEntry(entryId, patch),
     onMutate: ({ entryId, patch }) => patchCached(queryClient, ["library"], entryId, patch),
     onError: (_e, _v, rollback) => rollback?.(),
-    onSettled: () => queryClient.invalidateQueries({ queryKey: ["library"] }),
+    onSettled: refreshTaste,
   });
   const remove = useMutation({
     mutationFn: (entryId: number) => api.deleteEntry(entryId),
     onMutate: (entryId) => removeCached(queryClient, ["library"], entryId),
     onError: (_e, _v, rollback) => rollback?.(),
-    onSettled: () => queryClient.invalidateQueries({ queryKey: ["library"] }),
+    onSettled: refreshTaste,
   });
 
   const tmdbId = movie.data?.tmdb_id;

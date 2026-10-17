@@ -5,6 +5,7 @@ from rest_framework.test import APIClient
 from catalog.models import Genre, Movie
 from library.models import UserMovie
 from taste.models import MovieFeature, UserPreference
+from taste.reco import _cosine, recommend_for_user
 from taste.services import backfill_features, build_profile
 from taste.taxonomy import FEATURES, GENRE_FEATURES, GROUPS, rating_weight
 
@@ -115,3 +116,68 @@ class ProfileTests(TestCase):
         self.assertEqual(top["strength"], "emerging")  # 1 title < 3
         self.assertEqual(top["titles"][0]["title"], "Drama Film")
         self.assertEqual(top["titles"][0]["rating"], 9)
+
+
+class RecoTests(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.user, _ = User.objects.get_or_create(username="owner")
+        self.drama = make_movie(11, "Liked Drama", ["Drama"])
+        self.drama2 = make_movie(12, "Unseen Drama", ["Drama"])
+        self.horror = make_movie(13, "Unseen Horror", ["Horror"])
+        backfill_features()
+        UserMovie.objects.create(
+            user=self.user, movie=self.drama, status="WATCHED", rating=9.5
+        )
+        build_profile(self.user)
+
+    def test_excludes_library_titles(self):
+        results = recommend_for_user(self.user, limit=10)
+        titles = {r["title"] for r in results}
+        self.assertNotIn("Liked Drama", titles)
+        self.assertIn("Unseen Drama", titles)
+
+    def test_prefers_taste_and_genre_match(self):
+        results = recommend_for_user(self.user, limit=10)
+        self.assertGreaterEqual(len(results), 2)
+        # Same genre + shared taste features outrank unrelated horror.
+        self.assertEqual(results[0]["title"], "Unseen Drama")
+        self.assertEqual([r["rank"] for r in results], list(range(1, len(results) + 1)))
+
+    def test_explanations_reference_stored_signals(self):
+        results = recommend_for_user(self.user, limit=10)
+        top = results[0]
+        self.assertTrue(top["personalized"])
+        self.assertGreater(len(top["reasons"]), 0)
+        for reason in top["reasons"]:
+            self.assertIn(reason["feature"], FEATURES)
+        for similar in top["similar_liked"]:
+            self.assertEqual(similar["title"], "Liked Drama")
+
+    def test_cold_start_is_not_personalized(self):
+        User = get_user_model()
+        cold, _ = User.objects.get_or_create(username="cold")
+        results = recommend_for_user(cold, limit=5)
+        self.assertTrue(results)  # quality-ranked fallback, honest flag
+        self.assertFalse(results[0]["personalized"])
+        self.assertEqual(results[0]["reasons"], [])
+
+    def test_cosine_basics(self):
+        self.assertAlmostEqual(_cosine({"a": 1.0}, {"a": 1.0}), 1.0)
+        self.assertAlmostEqual(_cosine({"a": 1.0}, {"b": 1.0}), 0.0)
+
+    def test_recommendations_api_shape(self):
+        client = APIClient()
+        response = client.get("/api/v1/recommendations?limit=5")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("results", response.data)
+        self.assertIn("algorithm_version", response.data)
+        self.assertIn("generated_at", response.data)
+        item = response.data["results"][0]
+        for key in ("title", "score", "rank", "reasons", "similar_liked"):
+            self.assertIn(key, item)
+
+    def test_refresh_rebuilds_profile(self):
+        response = APIClient().post("/api/v1/recommendations/refresh")
+        self.assertEqual(response.status_code, 200)
+        self.assertGreater(response.data["rebuilt_preferences"], 0)

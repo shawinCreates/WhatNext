@@ -84,6 +84,37 @@ export type TasteProfile = {
   generated_at: string | null;
 };
 
+export type RecommendationReason = {
+  feature: string;
+  label: string;
+  strength: number;
+};
+
+export type Recommendation = {
+  kind: "movie" | "show";
+  id: number;
+  tmdb_id: number;
+  title: string;
+  year: number | null;
+  release_date: string | null;
+  poster_path: string;
+  backdrop_path: string;
+  overview: string;
+  vote_average: number | null;
+  score: number;
+  rank: number;
+  personalized: boolean;
+  reasons: RecommendationReason[];
+  similar_liked: { title: string; year: number | null; rating: number | null }[];
+};
+
+export type RecommendationsResponse = {
+  results: Recommendation[];
+  algorithm_version: string;
+  feature_version: string;
+  generated_at: string;
+};
+
 export type EntryPatch = {
   status?: LibraryStatus;
   is_favorite?: boolean;
@@ -226,6 +257,14 @@ export const api = {
     request<void>(`/library/shows/items/${id}`, { method: "DELETE" }),
   awardedMovies: () => request<Movie[]>("/movies/browse?section=awarded"),
   tasteProfile: () => request<TasteProfile>("/taste/profile"),
+  recommendations: (kind: "all" | "movie" | "show" = "all", limit = 10) =>
+    request<RecommendationsResponse>(
+      `/recommendations?kind=${kind}&limit=${limit}`,
+    ),
+  refreshRecommendations: () =>
+    request<{ rebuilt_preferences: number }>("/recommendations/refresh", {
+      method: "POST",
+    }),
   titleVideos: (media: "movie" | "tv", tmdbId: number) =>
     request<{ results: TmdbVideo[] }>(`/tmdb/${media}/${tmdbId}/videos`),
   titleCredits: (media: "movie" | "tv", tmdbId: number) =>

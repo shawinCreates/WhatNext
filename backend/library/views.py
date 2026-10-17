@@ -9,6 +9,12 @@ from .serializers import UserMovieSerializer, UserShowSerializer
 User = get_user_model()
 
 
+def _rebuild_profile(user):
+    from taste.services import build_profile
+
+    build_profile(user)
+
+
 def current_user(request):
     # ponytail: single-user assumption. Swap for request.user when auth is added.
     if request.user.is_authenticated:
@@ -31,6 +37,7 @@ def library(request):
         entry, created = UserMovie.objects.update_or_create(
             user=user, movie=movie, defaults=data
         )
+        _rebuild_profile(user)
         return Response(
             UserMovieSerializer(entry).data,
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
@@ -50,11 +57,13 @@ def library_item(request, pk):
 
     if request.method == "DELETE":
         entry.delete()
+        _rebuild_profile(user)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     serializer = UserMovieSerializer(entry, data=request.data, partial=True)
     serializer.is_valid(raise_exception=True)
     serializer.save()
+    _rebuild_profile(user)
     return Response(serializer.data)
 
 
@@ -70,6 +79,7 @@ def shows_library(request):
         entry, created = UserShow.objects.update_or_create(
             user=user, show=show, defaults=data
         )
+        _rebuild_profile(user)
         return Response(
             UserShowSerializer(entry).data,
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
@@ -89,9 +99,11 @@ def shows_library_item(request, pk):
 
     if request.method == "DELETE":
         entry.delete()
+        _rebuild_profile(user)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     serializer = UserShowSerializer(entry, data=request.data, partial=True)
     serializer.is_valid(raise_exception=True)
     serializer.save()
+    _rebuild_profile(user)
     return Response(serializer.data)

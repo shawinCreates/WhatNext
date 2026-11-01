@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { api, type TasteFeature } from "@/lib/api";
+import { api, type FeedbackStats, type TasteFeature } from "@/lib/api";
+import { CountUp } from "@/components/CountUp";
 import { Icon } from "@/components/icons";
 
 function FeatureCard({ item, max }: { item: TasteFeature; max: number }) {
@@ -42,8 +43,38 @@ function FeatureCard({ item, max }: { item: TasteFeature; max: number }) {
   );
 }
 
+function RecoFunnelCard({ stats }: { stats: FeedbackStats }) {
+  return (
+    <section aria-label="Recommendation funnel" className="neu p-5">
+      <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight">
+        <Icon name="sparkles" size={17} /> What served picks did
+      </h2>
+      <div className="mt-3 grid grid-cols-3 gap-4 text-center">
+        <div className="neu-inset px-3 py-3">
+          <CountUp value={stats.served} className="font-display text-2xl" />
+          <p className="mt-1 text-xs text-[#5b6b84]">suggestions shown</p>
+        </div>
+        <div className="neu-inset px-3 py-3">
+          <CountUp value={stats.watched} className="font-display text-2xl" />
+          <p className="mt-1 text-xs text-[#5b6b84]">you watched</p>
+        </div>
+        <div className="neu-inset px-3 py-3">
+          <CountUp value={stats.rejected} className="font-display text-2xl" />
+          <p className="mt-1 text-xs text-[#5b6b84]">you turned down</p>
+        </div>
+      </div>
+      <p className="mt-3 text-sm text-[#5b6b84]">
+        {stats.conversion != null
+          ? `${stats.served > 0 ? Math.round((stats.conversion || 0) * 100) : 0}% of served picks made it to your shelf.`
+          : "No suggestions served yet — open Tonight to start the funnel."}
+      </p>
+    </section>
+  );
+}
+
 export default function TasteProfilePage() {
   const profile = useQuery({ queryKey: ["taste-profile"], queryFn: api.tasteProfile });
+  const feedback = useQuery({ queryKey: ["reco-feedback"], queryFn: api.recoFeedback });
   const max =
     Math.max(
       0,
@@ -71,6 +102,8 @@ export default function TasteProfilePage() {
         </p>
       ) : (
         <>
+          {feedback.data && <RecoFunnelCard stats={feedback.data} />}
+
           <section aria-label="What you respond to">
             <h2 className="mb-3 flex items-center gap-2 text-lg font-semibold tracking-tight">
               <Icon name="flame" size={17} /> What you respond to

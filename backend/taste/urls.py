@@ -10,4 +10,10 @@ urlpatterns = [
         views.recommendations_refresh,
         name="recommendations-refresh",
     ),
+    path(
+        "recommendations/feedback",
+        views.recommendations_feedback,
+        name="recommendations-feedback",
+    ),
+    path("taste/similar/<str:kind>/<int:pk>", views.similar_titles, name="taste-similar"),
 ]

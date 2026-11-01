@@ -1,46 +1,32 @@
 "use client";
 
-import { useState } from "react";
-import Link from "next/link";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
-import {
-  api,
-  backdropUrl,
-  type SearchResult,
-  type TmdbTvResult,
-} from "@/lib/api";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { api, backdropUrl, type Recommendation } from "@/lib/api";
 import { go } from "@/lib/motion";
-import { QuickSearch, useReveal } from "@/components/QuickSearch";
-import { TonightPick, type TonightPick as Pick } from "@/components/TonightPick";
-import { Row, type RailItem } from "@/components/Row";
+import { DetailHero } from "@/components/DetailHero";
+import { TrailerModal } from "@/components/TrailerModal";
 import { Icon } from "@/components/icons";
 
 const HALF_HOUR = 1000 * 60 * 30;
+const HOUR = 1000 * 60 * 60;
 
-type TmdbItem = SearchResult & TmdbTvResult;
-
-function titleOf(item: TmdbItem) {
-  return item.title || item.name || "Untitled";
+function reasonFor(r: Recommendation) {
+  if (!r.personalized) return "A well-reviewed pick from the catalog.";
+  const labels = r.reasons.map((x) => x.label.toLowerCase()).slice(0, 3);
+  const liked = r.similar_liked.map((x) => x.title).slice(0, 2);
+  if (labels.length === 0) return "Picked from your shelf patterns.";
+  return `Because you like ${labels.join(", ")}${
+    liked.length > 0 ? ` — similar to ${liked.join(", ")}` : ""
+  }.`;
 }
-
-function yearOf(item: TmdbItem, kind: "movie" | "show") {
-  return ((kind === "movie" ? item.release_date : item.first_air_date) || "").slice(0, 4) || undefined;
-}
-
-const MOODS = [
-  { label: "Action", icon: "flame" as const, href: "/movies?genre=28" },
-  { label: "Laugh", icon: "sparkles" as const, href: "/movies?genre=35" },
-  { label: "Drama", icon: "film" as const, href: "/shows?genre=18" },
-  { label: "Sci-Fi", icon: "compass" as const, href: "/shows?genre=10765" },
-  { label: "Anime", icon: "star" as const, href: "/anime" },
-];
 
 export default function TonightPage() {
-  const [term, setTerm] = useState("");
-  const [debounced, setDebounced] = useState("");
-  const { open, pendingKey } = useReveal();
   const router = useRouter();
+  const queryClient = useQueryClient();
+  const [index, setIndex] = useState(0);
+  const [trailerOpen, setTrailerOpen] = useState(false);
 
   const reco = useQuery({
     queryKey: ["recommendations"],
@@ -48,179 +34,189 @@ export default function TonightPage() {
     staleTime: HALF_HOUR,
   });
 
-  const topMovies = useQuery({
-    queryKey: ["browse", "movie", "top_rated"],
-    queryFn: () => api.browse("movie", "top_rated"),
-    staleTime: HALF_HOUR,
-  });
-  const topShows = useQuery({
-    queryKey: ["browse", "show", "top_rated"],
-    queryFn: () => api.browse("show", "top_rated"),
-    staleTime: HALF_HOUR,
-  });
-  const weekShows = useQuery({
-    queryKey: ["browse", "show", "latest"],
-    queryFn: () => api.browse("show", "latest"),
-    staleTime: HALF_HOUR,
-  });
-  const weekAnime = useQuery({
-    queryKey: ["browse", "anime", "latest"],
-    queryFn: () => api.browse("anime", "latest"),
-    staleTime: HALF_HOUR,
+  const reject = useMutation({
+    mutationFn: async (r: Recommendation) => {
+      if (r.kind === "movie") await api.addToLibrary(r.id, "REJECTED");
+      else await api.addShowToLibrary(r.id, "REJECTED");
+    },
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["recommendations"] }),
   });
 
-  const toRail = (kind: "movie" | "show", item: TmdbItem): RailItem => ({
-    key: `${kind}-${item.id}`,
-    title: titleOf(item),
-    year: yearOf(item, kind),
-    posterPath: item.poster_path,
-    onSelect: () => open(kind, item.id),
-    selectPending: pendingKey === `open-${kind}-${item.id}`,
+  const candidates = (reco.data?.results ?? []).filter((r) => r.backdrop_path);
+  const active = candidates.length
+    ? candidates[index % candidates.length]
+    : undefined;
+  useEffect(() => setIndex(0), [candidates.length]);
+
+  const tmdbId = active?.tmdb_id;
+  const media = active?.kind === "movie" ? "movie" : "tv";
+  const videos = useQuery({
+    queryKey: ["videos", media, tmdbId],
+    queryFn: () => api.titleVideos(media, tmdbId!),
+    enabled: !!tmdbId,
+    staleTime: HOUR,
+  });
+  const credits = useQuery({
+    queryKey: ["credits", "movie", tmdbId],
+    queryFn: () => api.titleCredits("movie", tmdbId!),
+    enabled: !!tmdbId && active?.kind === "movie",
+    staleTime: HOUR,
   });
 
-  const voteOf = (item: TmdbItem) =>
-    typeof item.vote_average === "number" ? ` · ★ ${item.vote_average.toFixed(1)}` : "";
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setTrailerOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
-  const forYou: Pick[] = (reco.data?.results ?? [])
-    .filter((r) => r.personalized && r.backdrop_path)
-    .slice(0, 5)
-    .map((r) => {
-      const labels = r.reasons.map((x) => x.label.toLowerCase()).slice(0, 3);
-      const liked = r.similar_liked.map((x) => x.title).slice(0, 2);
-      const reason =
-        labels.length > 0
-          ? `Because you like ${labels.join(", ")}${liked.length > 0 ? ` — similar to ${liked.join(", ")}` : ""}.`
-          : "Picked from your shelf patterns.";
-      return {
-        key: `reco-${r.kind}-${r.id}`,
-        title: r.title,
-        meta: [r.year ? String(r.year) : null, r.kind === "movie" ? "Movie" : "Series"]
-          .filter(Boolean)
-          .join("  •  "),
-        overview: r.overview,
-        backdrop: backdropUrl(r.backdrop_path),
-        badge: "For you",
-        reason,
-        onOpen: () => go(router, r.kind === "movie" ? `/movie/${r.id}` : `/show/${r.id}`),
-      };
-    });
+  if (!active) {
+    return (
+      <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-10 px-6 py-8">
+        {reco.isPending ? (
+          <div className="neu-inset shimmer px-6 py-16" aria-busy>
+            <p className="text-sm text-[#5b6b84]">Picking tonight's titles…</p>
+          </div>
+        ) : reco.isError ? (
+          <div className="neu-inset px-6 py-16">
+            <p className="text-sm text-red-600">{String(reco.error)}</p>
+          </div>
+        ) : (
+          <div className="neu p-8">
+            <h2 className="font-display text-xl tracking-wide">
+              Nothing left to suggest
+            </h2>
+            <p className="mt-2 max-w-lg text-sm text-[#5b6b84]">
+              You've rated, saved, or rejected every title in the catalog.
+              Import more from Browse.
+            </p>
+          </div>
+        )}
+        <footer className="flex justify-center pb-4">
+          <p className="font-mono text-xs text-[#5b6b84]">
+            WhatNext · movies, shows & anime
+          </p>
+        </footer>
+      </div>
+    );
+  }
 
-  const picks: Pick[] = [
-    ...(topMovies.data?.results ?? []).slice(0, 3).map((item) => ({ kind: "movie" as const, item })),
-    ...(topShows.data?.results ?? []).slice(0, 3).map((item) => ({ kind: "show" as const, item })),
-  ]
-    .filter(({ item }) => item.backdrop_path)
-    .slice(0, 5)
-    .map(({ kind, item }) => ({
-      key: `${kind}-${item.id}`,
-      title: titleOf(item),
-      meta: [yearOf(item, kind), kind === "movie" ? "Movie" : "Series"].filter(Boolean).join("  •  "),
-      overview: item.overview,
-      backdrop: backdropUrl(item.backdrop_path),
-      badge: "Tonight's pick",
-      reason: `Top rated with the crowd${voteOf(item)} — shuffle for another.`,
-      onOpen: () => open(kind, item.id),
-      opening: pendingKey === `open-${kind}-${item.id}`,
-    }));
-
-  const ratedItems = [
-    ...(topMovies.data?.results ?? []).slice(0, 6).map((item) => ({ kind: "movie" as const, item })),
-    ...(topShows.data?.results ?? []).slice(0, 6).map((item) => ({ kind: "show" as const, item })),
-  ]
-    .slice(0, 12)
-    .map(({ kind, item }) => toRail(kind, item));
-
-  const weekItems = [
-    ...(weekShows.data?.results ?? []).slice(0, 6).map((item) => ({ kind: "show" as const, item })),
-    ...(weekAnime.data?.results ?? []).slice(0, 6).map((item) => ({ kind: "show" as const, item })),
-  ]
-    .slice(0, 12)
-    .map(({ kind, item }) => toRail(kind, item));
-
-  const loading = topMovies.isPending && topShows.isPending;
+  const rejecting =
+    reject.isPending &&
+    reject.variables?.id === active.id &&
+    reject.variables?.kind === active.kind;
+  const trailer = (videos.data?.results ?? []).find(
+    (v) => v.site === "YouTube" && (v.type === "Trailer" || v.type === "Teaser"),
+  );
+  const director =
+    active.kind === "movie"
+      ? (credits.data?.crew ?? []).find((c) => c.job === "Director")?.name
+      : undefined;
+  const voteText =
+    active.vote_average != null
+      ? `★ ${active.vote_average.toFixed(1)}${
+          active.vote_count ? ` (${active.vote_count.toLocaleString()})` : ""
+        }`
+      : undefined;
+  const facts = [
+    active.release_date
+      ? active.kind === "movie"
+        ? { icon: "calendar" as const, label: "Release", value: active.release_date }
+        : { icon: "calendar" as const, label: "First aired", value: active.release_date.slice(0, 4) }
+      : null,
+    active.kind === "movie"
+      ? active.runtime
+        ? { icon: "clock" as const, label: "Runtime", value: `${active.runtime} min` }
+        : null
+      : active.episodes
+        ? { icon: "play" as const, label: "Episodes", value: String(active.episodes) }
+        : null,
+    active.original_language
+      ? { icon: "compass" as const, label: "Language", value: active.original_language.toUpperCase() }
+      : null,
+    active.vote_average != null
+      ? { icon: "star" as const, label: "TMDB rating", value: voteText ?? "" }
+      : null,
+  ].filter((f): f is { icon: "calendar" | "clock" | "compass" | "play" | "star"; label: string; value: string } => Boolean(f));
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-10 px-6 py-8">
-      <section className="neu p-6 sm:p-8" aria-label="What to watch">
-        <h1 className="font-display text-xl tracking-wide sm:text-2xl">
-          What are you in the mood for?
-        </h1>
-        <div className="relative mt-4">
-          <div className="neu-inset flex items-center gap-3 px-5 py-3.5">
-            <Icon name="search" size={18} />
-            <input
-              value={term}
-              onChange={(e) => {
-                setTerm(e.target.value);
-                setDebounced(e.target.value.trim());
-              }}
-              placeholder="A title, a show, an anime…"
-              aria-label="Search titles"
-              className="w-full bg-transparent text-base outline-none placeholder:text-[#8a99b0]"
-            />
-            {term && (
-              <button
-                type="button"
-                onClick={() => {
-                  setTerm("");
-                  setDebounced("");
-                }}
-                aria-label="Clear search"
-              >
-                <Icon name="x" size={16} />
-              </button>
-            )}
-          </div>
-          <QuickSearch query={debounced} />
-        </div>
-        <div className="no-scrollbar mt-4 flex gap-2.5 overflow-x-auto pb-1">
-          {MOODS.map((m) => (
-            <Link
-              key={m.label}
-              href={m.href}
-              className="neu flex flex-shrink-0 items-center gap-2 px-4 py-2 text-sm font-medium"
+      <DetailHero
+        title={active.title}
+        backdropPath={active.backdrop_path}
+        kicker={active.award_label || (active.is_anime ? "Anime" : undefined)}
+        genres={active.genres}
+        overview={active.overview}
+        metaYear={active.year ? String(active.year) : undefined}
+        metaBadge={
+          active.kind === "movie"
+            ? active.runtime
+              ? `${active.runtime} min`
+              : undefined
+            : active.seasons
+              ? `${active.seasons} season${active.seasons === 1 ? "" : "s"}`
+              : undefined
+        }
+        vote={voteText}
+        creator={director
+          ? { label: "Director", value: director }
+          : active.created_by
+            ? { label: "Creator", value: active.created_by }
+            : undefined}
+        facts={facts}
+        onTrailer={trailer ? () => setTrailerOpen(true) : undefined}
+        shelf={
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() =>
+                go(
+                  router,
+                  active.kind === "movie" ? `/movie/${active.id}` : `/show/${active.id}`,
+                )
+              }
+              className="neu pressable flex items-center gap-2 !rounded-full px-6 py-3 text-sm font-semibold"
             >
-              <Icon name={m.icon} size={15} />
-              {m.label}
-            </Link>
-          ))}
-        </div>
-      </section>
+              <Icon name="play" size={16} filled /> Watch tonight
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                setIndex((i) => (i + 1) % Math.max(candidates.length, 1))
+              }
+              className="neu pressable flex items-center gap-2 !rounded-full px-5 py-3 text-sm text-[#5b6b84]"
+              aria-label="Shuffle to another pick"
+            >
+              <Icon name="compass" size={15} /> Shuffle
+            </button>
+            <button
+              type="button"
+              onClick={() => reject.mutate(active)}
+              disabled={rejecting}
+              className="neu pressable flex items-center gap-2 !rounded-full px-5 py-3 text-sm text-[#5b6b84] hover:text-red-600 disabled:opacity-50"
+              aria-label="Not for me — hide from recommendations"
+            >
+              <Icon name="x" size={15} />
+              {rejecting ? "Rejecting…" : "Not for me"}
+            </button>
+          </div>
+        }
+      />
 
-      {forYou.length > 0 && <TonightPick picks={forYou} />}
-
-      {loading ? (
-        <div className="neu-inset shimmer px-6 py-16" aria-busy>
-          <p className="text-sm text-[#5b6b84]">Picking tonight's titles…</p>
-        </div>
-      ) : picks.length > 0 ? (
-        <TonightPick picks={picks} />
-      ) : (
-        <div className="neu p-8">
-          <h2 className="font-display text-xl tracking-wide">Start with one title</h2>
-          <p className="mt-2 max-w-lg text-sm text-[#5b6b84]">
-            Search above or pick a mood — tonight's picks appear once the crowd data loads.
-          </p>
-        </div>
+      {reject.isError && (
+        <p className="text-sm text-red-600">{String(reject.error)}</p>
       )}
 
-      <Row
-        title="Top rated tonight"
-        subtitle="The crowd's highest verdicts"
-        icon="trophy"
-        viewAllHref="/browse?media=movie&section=top_rated"
-        items={ratedItems}
-        empty="Nothing rated yet — check the hubs."
-      />
-
-      <Row
-        title="On this week"
-        subtitle="Airing now across shows and anime"
-        icon="calendar"
-        viewAllHref="/browse?media=show&section=latest"
-        items={weekItems}
-        empty="Airing data unavailable."
-      />
+      {trailerOpen && trailer && (
+        <TrailerModal
+          title={active.title}
+          videoName={trailer.name}
+          videoKey={trailer.key}
+          onClose={() => setTrailerOpen(false)}
+        />
+      )}
 
       <footer className="flex justify-center pb-4">
         <p className="font-mono text-xs text-[#5b6b84]">

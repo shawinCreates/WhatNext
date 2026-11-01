@@ -101,6 +101,15 @@ export type Recommendation = {
   backdrop_path: string;
   overview: string;
   vote_average: number | null;
+  vote_count: number | null;
+  award_label: string | null;
+  created_by: string | null;
+  runtime: number | null;
+  seasons: number | null;
+  episodes: number | null;
+  is_anime: boolean | null;
+  original_language: string | null;
+  genres: { id: number; name: string }[];
   score: number;
   rank: number;
   personalized: boolean;
@@ -115,11 +124,29 @@ export type RecommendationsResponse = {
   generated_at: string;
 };
 
+export type FeedbackStats = {
+  served: number;
+  watched: number;
+  rejected: number;
+  conversion: number | null;
+};
+
 export type EntryPatch = {
   status?: LibraryStatus;
   is_favorite?: boolean;
   rating?: number | null;
   personal_note?: string;
+};
+
+export type SimilarItem = {
+  local: boolean;
+  kind: "movie" | "show";
+  /** Local pk when local, otherwise the TMDB id (imported on click). */
+  id: number;
+  tmdb_id: number;
+  title: string;
+  year: number | null;
+  poster_path: string | null;
 };
 
 export type TmdbTvResult = {
@@ -265,6 +292,7 @@ export const api = {
     request<{ rebuilt_preferences: number }>("/recommendations/refresh", {
       method: "POST",
     }),
+  recoFeedback: () => request<FeedbackStats>("/recommendations/feedback"),
   titleVideos: (media: "movie" | "tv", tmdbId: number) =>
     request<{ results: TmdbVideo[] }>(`/tmdb/${media}/${tmdbId}/videos`),
   titleCredits: (media: "movie" | "tv", tmdbId: number) =>
@@ -275,6 +303,8 @@ export const api = {
     request<{ results: (SearchResult & TmdbTvResult)[] }>(
       `/tmdb/${media}/${tmdbId}/similar`,
     ),
+  titleSimilarLocal: (kind: "movie" | "show", id: number, limit = 12) =>
+    request<{ results: SimilarItem[] }>(`/taste/similar/${kind}/${id}?limit=${limit}`),
   tvSeason: (tmdbId: number, season: number) =>
     request<{ season_number: number; episodes: TmdbEpisode[] }>(
       `/tmdb/tv/${tmdbId}/season/${season}`,

@@ -28,6 +28,7 @@ class Movie(models.Model):
     vote_average = models.FloatField(null=True, blank=True)
     vote_count = models.PositiveIntegerField(null=True, blank=True)
     award_label = models.CharField(max_length=200, blank=True, db_index=True)
+    director = models.CharField(max_length=300, blank=True)
     genres = models.ManyToManyField(Genre, related_name="movies", blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

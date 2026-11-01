@@ -26,15 +26,6 @@ export function ShelfActions({
       <div>
         <div className="flex items-center gap-2.5">
           <button
-            onClick={() => onAdd("WATCHLIST")}
-            disabled={busy.add}
-            title="Add to watchlist"
-            aria-label="Add to watchlist"
-            className={`neu ${circle}`}
-          >
-            <Icon name="plus" size={17} />
-          </button>
-          <button
             onClick={() => onAdd("WATCHED")}
             disabled={busy.add}
             title="Mark watched"

@@ -72,9 +72,9 @@ export default function MovieDetailPage() {
     staleTime: 1000 * 60 * 60,
   });
   const similar = useQuery({
-    queryKey: ["similar", "movie", tmdbId],
-    queryFn: () => api.titleSimilar("movie", tmdbId!),
-    enabled: !!tmdbId,
+    queryKey: ["similar-local", "movie", id],
+    queryFn: () => api.titleSimilarLocal("movie", id),
+    enabled: validId,
     staleTime: 1000 * 60 * 30,
   });
 
@@ -234,12 +234,13 @@ export default function MovieDetailPage() {
         icon="sparkles"
         hoverPlay
         items={(similar.data?.results ?? []).slice(0, 12).map((r) => ({
-          key: `sim-${r.id}`,
-          title: r.title || r.name || "Untitled",
-          year: ((r.release_date || r.first_air_date) || "").slice(0, 4) || undefined,
+          key: `${r.local ? "lsim" : "tsim"}-${r.id}`,
+          title: r.title,
+          year: r.year ? String(r.year) : undefined,
           posterPath: r.poster_path,
-          onSelect: () => openSimilar(r.id),
-          selectPending: pending === r.id,
+          onSelect: () =>
+            r.local ? go(router, `/movie/${r.id}`) : openSimilar(r.tmdb_id),
+          selectPending: !r.local && pending === r.tmdb_id,
         }))}
         empty="No similar titles found."
       />

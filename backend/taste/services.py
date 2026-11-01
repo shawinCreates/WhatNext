@@ -18,6 +18,7 @@ HEURISTIC_CONFIDENCE = 0.5
 RECENCY_HALFLIFE_DAYS = 730
 STRONG_EVIDENCE = 3
 STRONG_WEIGHT = 0.75
+REJECT_SCALE = 0.5  # unrated "Not for me" ≈ a 4-star shouting match (Phase 5)
 
 
 def _recency(age_days):
@@ -71,32 +72,41 @@ def backfill_features():
 
 
 def _contributions(user):
-    """Per-feature signed contributions with provenance for one user."""
+    """Per-feature signed contributions with provenance for one user.
+
+    WATCHED/skipped ratings feed positive evidence; REJECTED entries feed
+    negative evidence (explicit negative feedback, 06 §3 / Phase 5) —
+    regardless of whether they carry a rating.
+    """
     now = timezone.now()
-    movie_entries = list(
-        UserMovie.objects.filter(user=user, rating__isnull=False).select_related(
-            "movie"
-        )
-    )
-    show_entries = list(
-        UserShow.objects.filter(user=user, rating__isnull=False).select_related("show")
-    )
     out = []
-    for entry in movie_entries:
-        out.extend(_entry_items(entry, entry.movie, True, now))
-    for entry in show_entries:
-        out.extend(_entry_items(entry, entry.show, False, now))
+    for entry in UserMovie.objects.filter(user=user).select_related("movie"):
+        if entry.status == "REJECTED":
+            out.extend(_entry_items(entry, entry.movie, True, now, reject=True))
+        elif entry.rating is not None:
+            out.extend(_entry_items(entry, entry.movie, True, now))
+    for entry in UserShow.objects.filter(user=user).select_related("show"):
+        if entry.status == "REJECTED":
+            out.extend(_entry_items(entry, entry.show, False, now, reject=True))
+        elif entry.rating is not None:
+            out.extend(_entry_items(entry, entry.show, False, now))
     return out
 
 
-def _entry_items(entry, title, is_movie, now):
+def _entry_items(entry, title, is_movie, now, reject=False):
     feats = MovieFeature.objects.filter(
         **({"movie": title} if is_movie else {"show": title})
     )
     if not feats:
         return []
     age = (now - entry.updated_at).days
-    scale = rating_weight(entry.rating) * _entry_multiplier(entry) * _recency(age)
+    if reject:
+        # Rejection counts regardless of rating; favorite/rewatch don't apply.
+        scale = -REJECT_SCALE * _recency(age)
+        rating = entry.rating
+    else:
+        scale = rating_weight(entry.rating) * _entry_multiplier(entry) * _recency(age)
+        rating = entry.rating
     year = title.release_year
     name = getattr(title, "title", None) or title.name
     return [
@@ -105,7 +115,7 @@ def _entry_items(entry, title, is_movie, now):
             "contribution": scale * feat.value * feat.confidence,
             "title": name,
             "year": year,
-            "rating": entry.rating,
+            "rating": rating,
         }
         for feat in feats
     ]

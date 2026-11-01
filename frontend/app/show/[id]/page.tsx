@@ -72,9 +72,9 @@ export default function ShowDetailPage() {
     staleTime: 1000 * 60 * 60,
   });
   const similar = useQuery({
-    queryKey: ["similar", "tv", tmdbId],
-    queryFn: () => api.titleSimilar("tv", tmdbId!),
-    enabled: !!tmdbId,
+    queryKey: ["similar-local", "show", id],
+    queryFn: () => api.titleSimilarLocal("show", id),
+    enabled: validId,
     staleTime: 1000 * 60 * 30,
   });
   const seasonData = useQuery({
@@ -304,12 +304,13 @@ export default function ShowDetailPage() {
         icon="sparkles"
         hoverPlay
         items={(similar.data?.results ?? []).slice(0, 12).map((r) => ({
-          key: `sim-${r.id}`,
-          title: r.name || r.title || "Untitled",
-          year: ((r.first_air_date || r.release_date) || "").slice(0, 4) || undefined,
+          key: `${r.local ? "lsim" : "tsim"}-${r.id}`,
+          title: r.title,
+          year: r.year ? String(r.year) : undefined,
           posterPath: r.poster_path,
-          onSelect: () => openSimilar(r.id),
-          selectPending: pending === r.id,
+          onSelect: () =>
+            r.local ? go(router, `/show/${r.id}`) : openSimilar(r.tmdb_id),
+          selectPending: !r.local && pending === r.tmdb_id,
         }))}
         empty="No similar series found."
       />

@@ -9,6 +9,7 @@ from .services import (
     TMDBError,
     anime_section,
     credits,
+    director_of,
     genre_list,
     get_movie,
     get_show,
@@ -41,11 +42,12 @@ def search(request):
 def import_movie(request):
     serializer = ImportMovieSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
+    tmdb_id = serializer.validated_data["tmdb_id"]
     try:
-        payload = get_movie(serializer.validated_data["tmdb_id"])
+        payload = get_movie(tmdb_id)
     except TMDBError as exc:
         return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
-    movie = upsert_movie(payload)
+    movie = upsert_movie(payload, director=director_of("movie", tmdb_id))
     from taste.services import backfill_title
 
     backfill_title(movie=movie)

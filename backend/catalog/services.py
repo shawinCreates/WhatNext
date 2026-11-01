@@ -199,6 +199,18 @@ def credits(media, tmdb_id):
     return _get(f"/{media}/{tmdb_id}/credits")
 
 
+def director_of(media, tmdb_id):
+    """Top-billed director name ('' on TMDB trouble); shows use created_by instead."""
+    try:
+        payload = credits(media, tmdb_id)
+    except TMDBError:
+        return ""
+    return next(
+        (c.get("name", "") for c in payload.get("crew", []) if c.get("job") == "Director"),
+        "",
+    )[:300]
+
+
 def similar(media, tmdb_id, page=1):
     """TMDB's own similar titles for a movie or TV entry."""
     data = _get(f"/{media}/{tmdb_id}/similar", page=page, include_adult="false")
@@ -258,7 +270,7 @@ def upsert_show(payload):
     return show
 
 
-def upsert_movie(payload):
+def upsert_movie(payload, director=""):
     """Create or update a Movie (and its Genres) from a TMDB payload."""
     release_date = payload.get("release_date") or None
     movie, _ = Movie.objects.update_or_create(
@@ -277,6 +289,7 @@ def upsert_movie(payload):
             "tagline": payload.get("tagline") or "",
             "vote_average": payload.get("vote_average"),
             "vote_count": payload.get("vote_count"),
+            "director": director or "",
         },
     )
     movie.genres.set(_sync_genres(payload))

@@ -41,6 +41,24 @@ class MovieFeature(models.Model):
         return f"{title} [{self.feature_key}={self.value}]"
 
 
+class RecoServe(models.Model):
+    """One recommendation shown to a user; powers the "never the same picks" rotation."""
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="reco_serves",
+    )
+    tkey = models.CharField(max_length=20)  # 'm<id>' / 's<id>' like reco keys
+    served_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["user", "served_at"])]
+
+    def __str__(self):
+        return f"{self.user} served {self.tkey} at {self.served_at:%Y-%m-%d %H:%M}"
+
+
 class UserPreference(models.Model):
     """One aggregated taste dimension for a user (see 04-database-model §6)."""
 

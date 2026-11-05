@@ -1,4 +1,25 @@
+from django.conf import settings as django_settings
 from django.db import models
+
+try:
+    from pgvector.django import VectorField
+
+    HAS_PGVECTOR_LIB = True
+except Exception:
+    VectorField = None
+    HAS_PGVECTOR_LIB = False
+
+# The python lib alone is not enough: the pgvector server extension decides
+# the real column type. The settings flag keeps model, migrations and DB in
+# lockstep (see catalog.migrations.0008 for the upgrade path).
+HAS_PGVECTOR = HAS_PGVECTOR_LIB and django_settings.PGVECTOR_ENABLED
+
+
+def embedding_field():
+    """vector(384) under pgvector; plain JSON list storage otherwise."""
+    if HAS_PGVECTOR:
+        return VectorField(dimensions=384, null=True, blank=True)
+    return models.JSONField(null=True, blank=True)
 
 
 class Genre(models.Model):
@@ -29,7 +50,13 @@ class Movie(models.Model):
     vote_count = models.PositiveIntegerField(null=True, blank=True)
     award_label = models.CharField(max_length=200, blank=True, db_index=True)
     director = models.CharField(max_length=300, blank=True)
+    cast = models.JSONField(default=list, blank=True)
+    writers = models.JSONField(default=list, blank=True)
     genres = models.ManyToManyField(Genre, related_name="movies", blank=True)
+    # Semantic embedding for similarity (pgvector when the stack is enabled)
+    embedding = embedding_field()
+    embedding_model = models.CharField(max_length=100, blank=True)
+    embedding_updated_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -57,11 +84,15 @@ class Show(models.Model):
     episodes = models.PositiveIntegerField(null=True, blank=True)
     is_anime = models.BooleanField(default=False, db_index=True)
     created_by = models.CharField(max_length=500, blank=True)
+    cast = models.JSONField(default=list, blank=True)
     tagline = models.CharField(max_length=500, blank=True)
     vote_average = models.FloatField(null=True, blank=True)
     vote_count = models.PositiveIntegerField(null=True, blank=True)
     award_label = models.CharField(max_length=200, blank=True, db_index=True)
     genres = models.ManyToManyField(Genre, related_name="shows", blank=True)
+    embedding = embedding_field()
+    embedding_model = models.CharField(max_length=100, blank=True)
+    embedding_updated_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

@@ -124,6 +124,28 @@ export type RecommendationsResponse = {
   generated_at: string;
 };
 
+export type PairItem = {
+  kind: "movie" | "show";
+  id: number;
+  tmdb_id: number;
+  title: string;
+  year: number | null;
+  release_date: string | null;
+  poster_path: string | null;
+  overview: string;
+  vote_average: number | null;
+  genres: { id: number; name: string }[];
+  tkey: string;
+};
+
+export type PairComparison = {
+  id: number;
+  tkey_a: string;
+  tkey_b: string;
+  winner_tkey: string;
+  created_at: string | null;
+};
+
 export type FeedbackStats = {
   served: number;
   watched: number;
@@ -257,10 +279,18 @@ export const api = {
       body: JSON.stringify({ tmdb_id: tmdbId }),
     }),
   library: () => request<LibraryEntry[]>("/library"),
-  addToLibrary: (movieId: number, status: LibraryStatus) =>
+  addToLibrary: (
+    movieId: number,
+    status: LibraryStatus,
+    rating?: number | null,
+  ) =>
     request<LibraryEntry>("/library", {
       method: "POST",
-      body: JSON.stringify({ movie_id: movieId, status }),
+      body: JSON.stringify({
+        movie_id: movieId,
+        status,
+        ...(rating != null ? { rating } : {}),
+      }),
     }),
   updateEntry: (id: number, patch: EntryPatch) =>
     request<LibraryEntry>(`/library/items/${id}`, {
@@ -270,10 +300,18 @@ export const api = {
   deleteEntry: (id: number) =>
     request<void>(`/library/items/${id}`, { method: "DELETE" }),
   showsLibrary: () => request<ShowEntry[]>("/library/shows"),
-  addShowToLibrary: (showId: number, status: LibraryStatus) =>
+  addShowToLibrary: (
+    showId: number,
+    status: LibraryStatus,
+    rating?: number | null,
+  ) =>
     request<ShowEntry>("/library/shows", {
       method: "POST",
-      body: JSON.stringify({ show_id: showId, status }),
+      body: JSON.stringify({
+        show_id: showId,
+        status,
+        ...(rating != null ? { rating } : {}),
+      }),
     }),
   updateShowEntry: (id: number, patch: EntryPatch) =>
     request<ShowEntry>(`/library/shows/items/${id}`, {
@@ -284,15 +322,28 @@ export const api = {
     request<void>(`/library/shows/items/${id}`, { method: "DELETE" }),
   awardedMovies: () => request<Movie[]>("/movies/browse?section=awarded"),
   tasteProfile: () => request<TasteProfile>("/taste/profile"),
-  recommendations: (kind: "all" | "movie" | "show" = "all", limit = 10) =>
+  recommendations: (kind: "all" | "movie" | "show" = "all", limit = 10, context?: string) =>
     request<RecommendationsResponse>(
-      `/recommendations?kind=${kind}&limit=${limit}`,
+      `/recommendations?kind=${kind}&limit=${limit}${context ? `&context=${context}` : ""}`,
     ),
   refreshRecommendations: () =>
     request<{ rebuilt_preferences: number }>("/recommendations/refresh", {
       method: "POST",
     }),
   recoFeedback: () => request<FeedbackStats>("/recommendations/feedback"),
+  recoClick: (tkey: string, kind: string, titleId: number, position?: number) =>
+    request<{ ok: boolean }>("/recommendations/click", {
+      method: "POST",
+      body: JSON.stringify({ tkey, kind, id: titleId, title_id: titleId, position }),
+    }),
+  tastePair: () =>
+    request<{ a: PairItem; b: PairItem }>("/taste/pair"),
+  tastePairSubmit: (tkeyA: string, tkeyB: string, winnerTkey: string) =>
+    request<{ ok: boolean }>("/taste/pair/submit", {
+      method: "POST",
+      body: JSON.stringify({ tkey_a: tkeyA, tkey_b: tkeyB, winner_tkey: winnerTkey }),
+    }),
+  tastePairs: () => request<{ results: PairComparison[] }>("/taste/pairs"),
   titleVideos: (media: "movie" | "tv", tmdbId: number) =>
     request<{ results: TmdbVideo[] }>(`/tmdb/${media}/${tmdbId}/videos`),
   titleCredits: (media: "movie" | "tv", tmdbId: number) =>

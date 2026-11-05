@@ -7,9 +7,9 @@ recommendation pool past whatever you happen to have imported so far.
 
 from django.core.management.base import BaseCommand
 
-from taste.services import backfill_title
-
 from catalog import services
+from catalog.ingest import import_title
+from catalog.models import Movie, Show
 
 
 MOVIE_SECTIONS = ("trending", "top_rated")
@@ -52,23 +52,14 @@ class Command(BaseCommand):
         self.stdout.write("catalog refreshed.")
 
     def _exists(self, media, tmdb_id):
-        model = services.Movie if media == "movie" else services.Show
+        model = Movie if media == "movie" else Show
         return model.objects.filter(tmdb_id=tmdb_id).exists()
 
     def _import(self, media, tmdb_id):
-        """Fetch details (+ movie director), upsert, build features."""
-        details = services.get_movie if media == "movie" else services.get_show
+        """Details + credits in one TMDB call; upsert + features (ingest path)."""
         try:
-            payload = details(tmdb_id)
-            if media == "movie":
-                movie = services.upsert_movie(
-                    payload, director=services.director_of("movie", tmdb_id)
-                )
-                backfill_title(movie=movie)
-            else:
-                show = services.upsert_show(payload)
-                backfill_title(show=show)
-            return True
+            _title, imported_now = import_title(media, tmdb_id)
+            return imported_now
         except services.TMDBError as exc:
             self.stderr.write(f"{media}/{tmdb_id} import failed: {exc}")
             return False

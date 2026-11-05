@@ -35,7 +35,10 @@ def search_movies(query, page=1):
     return data.get("results", [])
 
 
-def get_movie(tmdb_id):
+def get_movie(tmdb_id, append=None):
+    """Movie details; `append` (e.g. "credits") rides along in the same call."""
+    if append:
+        return _get(f"/movie/{tmdb_id}", append_to_response=append)
     return _get(f"/movie/{tmdb_id}")
 
 
@@ -62,7 +65,10 @@ def search_shows(query, page=1):
     return data.get("results", [])
 
 
-def get_show(tmdb_id):
+def get_show(tmdb_id, append=None):
+    """Show details; `append` (e.g. "credits") rides along in the same call."""
+    if append:
+        return _get(f"/tv/{tmdb_id}", append_to_response=append)
     return _get(f"/tv/{tmdb_id}")
 
 
@@ -215,6 +221,24 @@ def similar(media, tmdb_id, page=1):
     """TMDB's own similar titles for a movie or TV entry."""
     data = _get(f"/{media}/{tmdb_id}/similar", page=page, include_adult="false")
     return data.get("results", [])
+
+
+def recommendations(media, tmdb_id, page=1):
+    """TMDB's 'because you liked this' list; the stronger sibling of similar()."""
+    data = _get(
+        f"/{media}/{tmdb_id}/recommendations", page=page, include_adult="false"
+    )
+    return data.get("results", [])
+
+
+def search_person(query, page=1):
+    data = _get("/search/person", query=query, page=page, include_adult="false")
+    return data.get("results", [])
+
+
+def person_media_credits(person_id, media="movie"):
+    """Everything credited to a person: {"cast": [...], "crew": [...]}."""
+    return _get(f"/person/{person_id}/{media}_credits")
 
 
 def season_detail(tmdb_id, season):

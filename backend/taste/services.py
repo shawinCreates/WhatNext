@@ -11,7 +11,7 @@ from django.utils import timezone
 from catalog.models import Movie, Show
 from library.models import UserMovie, UserShow
 
-from .models import MovieFeature, UserPreference
+from .models import MovieFeature, PairwiseComparison, UserPreference
 from .taxonomy import FEATURES, GENRE_FEATURES, rating_weight
 
 HEURISTIC_CONFIDENCE = 0.5
@@ -19,6 +19,7 @@ RECENCY_HALFLIFE_DAYS = 730
 STRONG_EVIDENCE = 3
 STRONG_WEIGHT = 0.75
 REJECT_SCALE = 0.5  # unrated "Not for me" ≈ a 4-star shouting match (Phase 5)
+PAIRWISE_WEIGHT = 0.3  # explicit A-over-B preference signal (V1)
 
 
 def _recency(age_days):
@@ -121,17 +122,130 @@ def _entry_items(entry, title, is_movie, now, reject=False):
     ]
 
 
+def _title_for_tkey(tkey):
+    """Map 'm<id>' / 's<id>' back to its catalog title object, or None."""
+    if not tkey or len(tkey) < 2:
+        return None
+    prefix, id_part = tkey[0], tkey[1:]
+    try:
+        pk = int(id_part)
+    except (TypeError, ValueError):
+        return None
+    if prefix == "m":
+        return Movie.objects.filter(id=pk).first()
+    if prefix == "s":
+        return Show.objects.filter(id=pk).first()
+    return None
+
+
+def _pairwise_contributions(user):
+    """Signed feature contributions from explicit pairwise comparisons.
+
+    A win lifts the winner's features and presses the loser's, so a
+    consistent A-over-B preference shapes the profile without a rating.
+    """
+    out = []
+    for comp in (
+        PairwiseComparison.objects.filter(user=user)
+        .exclude(winner_tkey="tie")
+        .only("tkey_a", "tkey_b", "winner_tkey")
+    ):
+        winner_tkey = comp.winner_tkey
+        if winner_tkey == "neither":
+            # Neither title is liked: press both feature sets negatively.
+            titles = [
+                (_title_for_tkey(comp.tkey_a), comp.tkey_a),
+                (_title_for_tkey(comp.tkey_b), comp.tkey_b),
+            ]
+            for title, _ in titles:
+                if not title:
+                    continue
+                is_movie = isinstance(title, Movie)
+                feats = MovieFeature.objects.filter(
+                    **({"movie": title} if is_movie else {"show": title})
+                )
+                name = getattr(title, "title", None) or title.name
+                year = title.release_year
+                for feat in feats:
+                    out.append(
+                        {
+                            "feature": feat.feature_key,
+                            "contribution": -PAIRWISE_WEIGHT * feat.value * feat.confidence,
+                            "title": name,
+                            "year": year,
+                            "rating": None,
+                        }
+                    )
+            continue
+        winner = _title_for_tkey(winner_tkey)
+        loser_tkey = comp.tkey_b if winner_tkey == comp.tkey_a else comp.tkey_a
+        loser = _title_for_tkey(loser_tkey)
+        if not winner or not loser:
+            continue
+        winner_is_movie = isinstance(winner, Movie)
+        loser_is_movie = isinstance(loser, Movie)
+        winner_feats = MovieFeature.objects.filter(
+            **({"movie": winner} if winner_is_movie else {"show": winner})
+        )
+        loser_feats = MovieFeature.objects.filter(
+            **({"movie": loser} if loser_is_movie else {"show": loser})
+        )
+        wname = getattr(winner, "title", None) or winner.name
+        lname = getattr(loser, "title", None) or loser.name
+        wyear = winner.release_year
+        lyear = loser.release_year
+        for feat in winner_feats:
+            out.append(
+                {
+                    "feature": feat.feature_key,
+                    "contribution": PAIRWISE_WEIGHT * feat.value * feat.confidence,
+                    "title": wname,
+                    "year": wyear,
+                    "rating": None,
+                }
+            )
+        for feat in loser_feats:
+            out.append(
+                {
+                    "feature": feat.feature_key,
+                    "contribution": -PAIRWISE_WEIGHT * feat.value * feat.confidence,
+                    "title": lname,
+                    "year": lyear,
+                    "rating": None,
+                }
+            )
+    return out
+
+
 def build_profile(user):
-    """Rebuild all ratings-sourced UserPreferences for one user."""
-    contribs = _contributions(user)
-    UserPreference.objects.filter(user=user, source="ratings").delete()
+    """Rebuild all UserPreferences for one user (ratings + pairwise signals).
+
+    Pairwise comparisons add explicit A-over-B evidence on top of rating-
+    sourced preferences. Both sources are cleared and rebuilt together so a
+    feature keeps a single aggregated preference.
+    """
+    rating_contribs = _contributions(user)
+    pairwise_contribs = _pairwise_contributions(user)
+    contribs = rating_contribs + pairwise_contribs
+    UserPreference.objects.filter(
+        user=user, source__in=("ratings", "pairwise")
+    ).delete()
     totals = {}
-    for item in contribs:
+    rating_keys = set()
+    for item in rating_contribs:
         agg = totals.setdefault(
             item["feature"], {"total": 0.0, "titles": set()}
         )
         agg["total"] += item["contribution"]
         agg["titles"].add(item["title"])
+        rating_keys.add(item["feature"])
+    for item in pairwise_contribs:
+        agg = totals.setdefault(
+            item["feature"], {"total": 0.0, "titles": set()}
+        )
+        agg["total"] += item["contribution"]
+        if item.get("title"):
+            agg["titles"].add(item["title"])
     prefs = []
     for key, agg in totals.items():
         if key not in FEATURES or agg["total"] == 0:
@@ -144,7 +258,7 @@ def build_profile(user):
                 polarity=1 if agg["total"] >= 0 else -1,
                 weight=round(abs(agg["total"]), 4),
                 confidence=round(min(1.0, evidence / 5), 4),
-                source="ratings",
+                source="ratings" if key in rating_keys else "pairwise",
             )
         )
     UserPreference.objects.bulk_create(prefs)

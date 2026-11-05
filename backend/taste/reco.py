@@ -1,20 +1,26 @@
-"""Heuristic recommendations (Phase 4 Slice 1): taste vectors x genre overlap.
+"""Heuristic + semantic recommendations (Phase 4): taste vectors x genre overlap + embeddings.
 
-No ML, no embeddings. Scores local catalog titles the user has no
+Scores local catalog titles the user has no
 library entry for, re-ranks with MMR, and explains from stored prefs.
 Mirrors 05-recommendation-engine §§3-9 with honest stand-ins:
 
-- semantic_similarity -> max genre-Jaccard vs liked titles (no embeddings yet)
-- entity_affinity -> 0 (no cast/crew stored; see catalog/models.py)
+- semantic_similarity -> max genre-Jaccard vs liked titles + embedding cosine when available
+- entity_affinity -> director/cast/writers overlap with loved titles' credits
 - novelty -> constant until popularity signals are calibrated
 - predicted_rating -> predict_rating (item kNN over own ratings), eval-only
   until it replaces the quality stand-in in scoring (C1)
+
+Candidate pool: title quality (crowd votes) ordering dominates, with a fixed
+random long-tail share per request — as the catalog deepens (crawl_taste,
+expand_catalog), pure vote ordering would bury every modest-vote title deeper
+than the pool cap and the engine would never see them.
 """
 
 import math
 import random
 from datetime import timedelta
 
+from django.db import models
 from django.utils import timezone
 
 from catalog.models import Movie, Show
@@ -23,16 +29,34 @@ from library.models import UserMovie, UserShow
 from .models import MovieFeature, RecoServe, UserPreference
 from .taxonomy import FEATURES
 
-ALGORITHM_VERSION = "heuristic-v1.1"
-FEATURE_VERSION = "genre-heuristic-v1"
+ALGORITHM_VERSION = "hybrid-embeddings-v2"
+FEATURE_VERSION = "genre-heuristic-v1+embeddings"
 MMR_LAMBDA = 0.5
 LIKED_RATING = 8.0
-MAX_CANDIDATES = 1000
+MAX_CANDIDATES = 3000
+LONGTAIL_SHARE = 0.25  # per-request random slice; deep-pool titles must get scored
 MID_RATING = 5.5
 JITTER = 0.05  # score noise shelf; near-ties reshuffle on every request
 ROTATION_DAYS = 3
 ROTATION_CAP = 30
 SIMILAR_COSINE = 0.7  # local "more like this": cosine 0.7 + genre-Jaccard 0.3
+
+
+def _cosine_np(a, b):
+    try:
+        import numpy as _np
+
+        if a is None or b is None:
+            return 0.0
+        a = _np.array(a, dtype=_np.float32)
+        b = _np.array(b, dtype=_np.float32)
+        na = _np.linalg.norm(a)
+        nb = _np.linalg.norm(b)
+        if na == 0 or nb == 0:
+            return 0.0
+        return float(_np.dot(a, b) / (na * nb))
+    except Exception:
+        return 0.0
 
 
 def _signed_prefs(user):
@@ -69,12 +93,35 @@ def _cosine(a, b):
 
 
 def _entities_of(title, is_movie):
-    """Director (movies) / creator (shows) name set used for affinity."""
+    """Director/cast/writers (movies) or creator/cast (shows)."""
+    entities = set()
     if is_movie:
         director = getattr(title, "director", "") or ""
-        return {director} if director else set()
+        if director:
+            entities.add(director)
+        cast = getattr(title, "cast", None) or []
+        if isinstance(cast, list):
+            for c in cast:
+                if isinstance(c, str) and c:
+                    entities.add(c)
+        writers = getattr(title, "writers", None) or []
+        if isinstance(writers, list):
+            for w in writers:
+                if isinstance(w, str) and w:
+                    entities.add(w)
+        return entities
     names = getattr(title, "created_by", "") or ""
-    return {n.strip() for n in names.split(",") if n.strip()}
+    if names:
+        for n in names.split(","):
+            n = n.strip()
+            if n:
+                entities.add(n)
+    cast = getattr(title, "cast", None) or []
+    if isinstance(cast, list):
+        for c in cast:
+            if isinstance(c, str) and c:
+                entities.add(c)
+    return entities
 
 
 def _entity_score(candidates_entities, liked_entities):
@@ -82,6 +129,37 @@ def _entity_score(candidates_entities, liked_entities):
     if not candidates_entities or not liked_entities:
         return 0.0
     return len(candidates_entities & liked_entities) / len(candidates_entities)
+
+
+def _liked_title_embeds(liked):
+    """Average embedding of liked titles for semantic affinity."""
+    embeds = []
+    for l in liked:
+        title_obj = l.get("_obj")
+        if title_obj and getattr(title_obj, "embedding", None):
+            try:
+                embeds.append(title_obj.embedding)
+            except Exception:
+                pass
+    if not embeds:
+        return None
+    try:
+        import numpy as _np
+
+        arr = _np.array([_np.array(e, dtype=_np.float32) for e in embeds])
+        mean = arr.mean(axis=0)
+        norm = _np.linalg.norm(mean)
+        if norm > 0:
+            mean = mean / norm
+        return mean.tolist()
+    except Exception:
+        return None
+
+
+def _semantic_embed_sim(title, liked_embeds):
+    if liked_embeds is None or not getattr(title, "embedding", None):
+        return 0.0
+    return _cosine_np(title.embedding, liked_embeds)
 
 
 def _liked_titles(user):
@@ -108,12 +186,71 @@ def _liked_titles(user):
                     if isinstance(entry, UserMovie)
                     else f"s{title.id}"
                 ),
+                "_obj": title,
             }
         )
     return liked
 
 
-def _candidates(user, kind, features, skip=()):
+def _vector_pool(qs, cap, target_embed):
+    """SQL-side pgvector pre-filter: candidates nearest the loved-titles mean.
+
+    Returns None whenever pgvector isn't active (jsonb columns, lib missing)
+    or the query fails — the jsonb world must keep working untouched.
+    """
+    try:
+        from catalog.models import HAS_PGVECTOR
+
+        if not HAS_PGVECTOR:
+            return None
+        from pgvector.django import CosineDistance
+
+        return list(
+            qs.filter(embedding__isnull=False)
+            .annotate(_dist=CosineDistance("embedding", target_embed))
+            .order_by("_dist", models.F("vote_count").desc(nulls_last=True))[:cap]
+        )
+    except Exception:
+        return None
+
+
+def _pool_slice(qs, cap, target_embed=None):
+    """Ordering strategy for the scoring pool.
+
+    1. pgvector taste-order (SQL cosine to the liked-titles mean) when the
+       stack is enabled: the deep pool with embeddings leads, crowd-quality
+       titles backfill the slice (new imports before embed_catalog runs).
+    2. Fallback (no target / no pgvector): crowd-quality ordering dominated,
+       with a fixed random long-tail share — pure vote ordering would bury
+       every modest-vote import beyond the pool cap.
+    """
+    if target_embed is not None:
+        pool = _vector_pool(qs, cap, target_embed)
+        if pool is not None:
+            picked = {t.pk for t in pool}
+            room = cap - len(pool)
+            if room > 0:
+                pool += list(
+                    qs.exclude(pk__in=picked)
+                    .order_by(
+                        models.F("vote_count").desc(nulls_last=True),
+                        models.F("vote_average").desc(nulls_last=True),
+                    )[:room]
+                )
+            return pool
+    quality_cap = max(1, cap - int(cap * LONGTAIL_SHARE))
+    quality = list(
+        qs.order_by(
+            models.F("vote_count").desc(nulls_last=True),
+            models.F("vote_average").desc(nulls_last=True),
+        )[:quality_cap]
+    )
+    quality_ids = [t.pk for t in quality]
+    tail = list(qs.exclude(pk__in=quality_ids).order_by("?")[: cap - len(quality)])
+    return quality + tail
+
+
+def _candidates(user, kind, features, skip=(), liked_embeds=None):
     lib_movie_ids = set(
         UserMovie.objects.filter(user=user).values_list("movie_id", flat=True)
     )
@@ -122,10 +259,10 @@ def _candidates(user, kind, features, skip=()):
     )
     items = []
     if kind in ("all", "movie"):
-        for m in (
-            Movie.objects.exclude(id__in=lib_movie_ids)
-            .prefetch_related("genres")
-            .order_by("-vote_count", "-vote_average")[:MAX_CANDIDATES]
+        for m in _pool_slice(
+            Movie.objects.exclude(id__in=lib_movie_ids).prefetch_related("genres"),
+            MAX_CANDIDATES,
+            liked_embeds,
         ):
             if f"m{m.id}" in skip:
                 continue
@@ -133,10 +270,10 @@ def _candidates(user, kind, features, skip=()):
             if vec:
                 items.append(("movie", m, vec))
     if kind in ("all", "show"):
-        for s in (
-            Show.objects.exclude(id__in=lib_show_ids)
-            .prefetch_related("genres")
-            .order_by("-vote_count", "-vote_average")[:MAX_CANDIDATES]
+        for s in _pool_slice(
+            Show.objects.exclude(id__in=lib_show_ids).prefetch_related("genres"),
+            MAX_CANDIDATES,
+            liked_embeds,
         ):
             if f"s{s.id}" in skip:
                 continue
@@ -146,20 +283,31 @@ def _candidates(user, kind, features, skip=()):
     return items
 
 
-def _score_user(user, kind, features, prefs, liked_genres, liked_entities, skip, jitter):
+def _score_user(user, kind, features, prefs, liked_genres, liked_entities, skip, jitter, liked_embeds=None, context=None):
     """Jittered final scores for every candidate: [(score, kind, title, vec)]."""
     scored = []
     rated = _own_ratings(user)
-    for k, title, vec in _candidates(user, kind, features, skip=skip):
+    for k, title, vec in _candidates(
+        user, kind, features, skip=skip, liked_embeds=liked_embeds
+    ):
         genres = set(g.id for g in title.genres.all())
-        taste_raw, semantic = _score(prefs, vec, genres, liked_genres)
+        taste_raw, semantic_genre = _score(prefs, vec, genres, liked_genres)
+        # Blend embedding similarity if available (prefer embeddings)
+        embed_sim = _semantic_embed_sim(title, liked_embeds)
+        if embed_sim > 0 and semantic_genre >= 0:
+            semantic = 0.7 * embed_sim + 0.3 * semantic_genre
+        elif embed_sim > 0:
+            semantic = embed_sim
+        else:
+            semantic = semantic_genre
         tkey = f"m{title.id}" if k == "movie" else f"s{title.id}"
-        predicted, _, _ = (
+        predicted, _, covered = (
             predict_rating(user, tkey, features, rated=rated) if rated else (None, None, False)
         )
         entity = _entity_score(
             _entities_of(title, k == "movie"), liked_entities
         )
+        quality = _quality(title.vote_average, predicted, bool(rated))
         scored.append(
             (
                 k,
@@ -167,8 +315,10 @@ def _score_user(user, kind, features, prefs, liked_genres, liked_entities, skip,
                 vec,
                 taste_raw,
                 semantic,
-                _quality(title.vote_average, predicted, bool(rated)),
+                quality,
                 entity,
+                predicted,
+                covered,
             )
         )
     if not scored:
@@ -178,13 +328,22 @@ def _score_user(user, kind, features, prefs, liked_genres, liked_entities, skip,
     lo, hi = min(raws), max(raws)
     span = hi - lo or 1.0
     ranked = []
-    for k, title, vec, raw, semantic, quality, entity in scored:
-        score = (
-            0.45 * ((raw - lo) / span)
-            + 0.25 * semantic
-            + 0.15 * quality
-            + 0.15 * entity
-        )
+    for k, title, vec, raw, semantic, quality, entity, predicted, covered in scored:
+        taste_n = (raw - lo) / span
+        if covered and predicted is not None:
+            # Renormalize: redistribute if predicted not covered (covered means True here)
+            score = (
+                0.40 * taste_n
+                + 0.20 * semantic
+                + 0.15 * quality
+                + 0.15 * max(0.0, min(1.0, (predicted - 1) / 9))
+                + 0.10 * entity
+            )
+        else:
+            # Redistribute 0.15 to remaining components proportionally (sum 0.85 -> scale to 1)
+            score = (0.40 * taste_n + 0.20 * semantic + 0.15 * quality + 0.10 * entity) / 0.85
+        if context:
+            score = _apply_context_boost(score, title, k, context)
         if jitter:
             score += random.uniform(-JITTER, JITTER)
         ranked.append((score, k, title, vec))
@@ -207,6 +366,23 @@ def _mmr_select(pool, count):
         selected.append(best)
         remaining.remove(best)
     return selected
+
+
+def _apply_context_boost(score, title, kind, context):
+    if not context:
+        return score
+    ctx = str(context).lower()
+    boost = 1.0
+    runtime = getattr(title, "runtime", None)
+    if ctx == "tonight":
+        if runtime and runtime <= 120:
+            boost *= 1.08
+        # heuristic: prefer higher vote average / shorter generally
+        boost *= 1.0
+    elif ctx == "weekend":
+        if runtime and runtime >= 90:  # allow longer
+            boost *= 1.05
+    return score * boost
 
 
 def _score(prefs, vec, genres, liked_genres):
@@ -307,7 +483,7 @@ def _recent_serves(user):
     return set(serves)
 
 
-def recommend_for_user(user, kind="all", limit=20, jitter=True, skip_recent=True):
+def recommend_for_user(user, kind="all", limit=20, jitter=True, skip_recent=True, context=None):
     """Score unseen catalog titles, MMR re-rank, explain from stored prefs.
 
     kind="all" reserves ~a quarter of the slots for shows (min 2) so series
@@ -320,15 +496,16 @@ def recommend_for_user(user, kind="all", limit=20, jitter=True, skip_recent=True
     liked = _liked_titles(user)
     liked_genres = [l["genres"] for l in liked if l["genres"]]
     liked_entities = set().union(*[l["entities"] for l in liked]) if liked else set()
+    liked_embeds = _liked_title_embeds(liked)
     skip = _recent_serves(user) if skip_recent else set()
 
     ranked = _score_user(
-        user, kind, features, prefs, liked_genres, liked_entities, skip, jitter
+        user, kind, features, prefs, liked_genres, liked_entities, skip, jitter, liked_embeds=liked_embeds, context=context
     )
     if len(ranked) < limit and skip:
         # Small catalog: rotated-out titles are needed to fill the page.
         ranked = _score_user(
-            user, kind, features, prefs, liked_genres, liked_entities, set(), jitter
+            user, kind, features, prefs, liked_genres, liked_entities, set(), jitter, liked_embeds=liked_embeds, context=context
         )
     if not ranked:
         return []
@@ -357,16 +534,42 @@ def recommend_for_user(user, kind="all", limit=20, jitter=True, skip_recent=True
 
 def log_serves(user, results):
     """Record what was actually shown so the next request rotates past it."""
+    from .models import RecoImpression
+
     RecoServe.objects.bulk_create(
         RecoServe(
             user=user,
             tkey=f"m{r['id']}" if r["kind"] == "movie" else f"s{r['id']}",
+            algorithm_version=ALGORITHM_VERSION,
+            feature_version=FEATURE_VERSION,
         )
         for r in results
     )
+    # Also log impressions for learning loop
+    try:
+        RecoImpression.objects.bulk_create(
+            RecoImpression(
+                user=user,
+                tkey=f"m{r['id']}" if r["kind"] == "movie" else f"s{r['id']}",
+                kind=r["kind"],
+                title_id=r["id"],
+                position=r.get("rank"),
+                algorithm_version=ALGORITHM_VERSION,
+                feature_version=FEATURE_VERSION,
+            )
+            for r in results
+        )
+    except Exception:
+        pass
     RecoServe.objects.filter(
         user=user, served_at__lt=timezone.now() - timedelta(days=90)
     ).delete()
+    try:
+        RecoImpression.objects.filter(
+            user=user, impression_at__lt=timezone.now() - timedelta(days=90)
+        ).delete()
+    except Exception:
+        pass
 
 
 def feedback_payload(user):
@@ -430,10 +633,16 @@ def similar_for_title(user, kind, title, limit=12):
             continue
         vec = features.get(f"m{other.id}" if kind == "movie" else f"s{other.id}") or {}
         genres = set(g.id for g in other.genres.all())
-        similarity = (
-            SIMILAR_COSINE * _cosine(target, vec)
-            + (1 - SIMILAR_COSINE) * _jaccard(genres, target_genres)
-        )
+        sim_feat = _cosine(target, vec)
+        sim_gen = _jaccard(genres, target_genres)
+        sim_emb = _cosine_np(getattr(title, "embedding", None), getattr(other, "embedding", None))
+        if sim_emb > 0:
+            similarity = 0.7 * sim_emb + 0.2 * sim_feat + 0.1 * sim_gen
+        else:
+            similarity = (
+                SIMILAR_COSINE * sim_feat
+                + (1 - SIMILAR_COSINE) * sim_gen
+            )
         scored.append((similarity, other))
     scored.sort(key=lambda s: s[0], reverse=True)
 

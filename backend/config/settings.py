@@ -155,10 +155,21 @@ REST_FRAMEWORK = {
 
 
 # TMDB
-# https://developer.themoviedb.org/reference/intro/getting-started
+TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "")
+TMDB_BASE_URL = os.environ.get("TMDB_BASE_URL", "https://api.themoviedb.org/3")
 
-TMDB_API_KEY = os.environ.get('TMDB_API_KEY', '')
-TMDB_BASE_URL = os.environ.get('TMDB_BASE_URL', 'https://api.themoviedb.org/3')
+# Embeddings
+EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
+EMBEDDING_DIM = int(os.environ.get("EMBEDDING_DIM", "384"))
+
+# True vector columns need the pgvector *server* extension: on this machine
+# `apt install postgresql-18-pgvector`, on Supabase it is built in. When the
+# flag is off, embeddings stay in jsonb columns (catalog.migrations.0006
+# shape). catalog.migrations.0008 uses the same flag, so flipping it turns
+# that migration into a safe jsonb→vector upgrade on any database.
+PGVECTOR_ENABLED = os.environ.get(
+    "PGVECTOR_ENABLED", "False"
+).strip().lower() in ("1", "true", "yes", "on")
 
 
 # Email

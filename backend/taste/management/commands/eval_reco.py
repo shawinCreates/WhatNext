@@ -15,12 +15,14 @@ from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
+from catalog.models import Movie, Show
 from library.models import UserMovie, UserShow
 
 from taste.reco import (
     ALGORITHM_VERSION,
     FEATURE_VERSION,
     _candidates,
+    _cosine,
     _feature_map,
     predict_rating,
     recommend_for_user,
@@ -29,6 +31,27 @@ from taste.services import build_profile
 
 HIT_KS = (5, 10, 20)
 TITLE_KEY = {"movie": "m", "show": "s"}
+
+
+def _list_diversity(recs, features):
+    """Intra-list diversity: 1 minus mean pairwise feature-cosine similarity.
+
+    Higher means the list is more diverse (less redundant). Returns None when
+    a list has fewer than two scorable items.
+    """
+    vecs = []
+    for r in recs:
+        tkey = TITLE_KEY[r["kind"]] + str(r["id"])
+        v = features.get(tkey)
+        if v:
+            vecs.append(v)
+    if len(vecs) < 2:
+        return None
+    sims = []
+    for i in range(len(vecs)):
+        for j in range(i + 1, len(vecs)):
+            sims.append(_cosine(vecs[i], vecs[j]))
+    return 1.0 - (sum(sims) / len(sims))
 
 
 class _FoldDone(Exception):
@@ -61,11 +84,14 @@ def run_eval(user, threshold=8.0, limit=20, kind="all", sample=0, verbose=False)
         random.shuffle(folds)
         folds = folds[:sample]
 
+    total_catalog = Movie.objects.count() + Show.objects.count()
     hits = {k: 0 for k in HIT_KS}
     pop_hits = {k: 0 for k in HIT_KS}
     rr, hit_ranks = 0.0, []
     abs_errs, sq_errs, signed_errs, base_errs = [], [], [], []
     fallback, lines = 0, []
+    recommended = set()
+    diversities = []
     for (entry, leaf) in folds:
         title = getattr(entry, leaf)
         name = getattr(title, "title", None) or title.name
@@ -78,6 +104,11 @@ def run_eval(user, threshold=8.0, limit=20, kind="all", sample=0, verbose=False)
                 recs = recommend_for_user(
                     user, kind=kind, limit=limit, jitter=False, skip_recent=False
                 )
+                for r in recs:
+                    recommended.add((r["kind"], r["id"]))
+                div = _list_diversity(recs, features)
+                if div is not None:
+                    diversities.append(div)
                 rank = next(
                     (
                         r["rank"]
@@ -141,6 +172,14 @@ def run_eval(user, threshold=8.0, limit=20, kind="all", sample=0, verbose=False)
         "rmse": round(math.sqrt(sum(sq_errs) / len(sq_errs)), 4) if sq_errs else None,
         "bias": round(sum(signed_errs) / len(signed_errs), 4) if signed_errs else None,
         "baseline_mae": round(sum(base_errs) / len(base_errs), 4) if base_errs else None,
+        "diversity": (
+            round(sum(diversities) / len(diversities), 4) if diversities else None
+        ),
+        "coverage": (
+            round(len(recommended) / total_catalog, 4) if total_catalog else None
+        ),
+        "recommended": len(recommended),
+        "catalog": total_catalog,
     }
     return summary, lines
 
@@ -188,6 +227,13 @@ class Command(BaseCommand):
         out(f"  MRR   {summary['mrr']:.2f}")
         if summary["mean_hit_rank"]:
             out(f"  mean rank of hits: {summary['mean_hit_rank']:.1f}")
+        out(
+            f"  intra-list diversity  {summary['diversity'] if summary['diversity'] is not None else 'n/a'}"
+        )
+        out(
+            f"  coverage  {summary['coverage'] if summary['coverage'] is not None else 'n/a'} "
+            f"({summary['recommended']}/{summary['catalog']} catalog)"
+        )
         out("rating error (engine vs predict-the-average baseline):")
         out(f"  MAE   {summary['mae']:.2f}   baseline {summary['baseline_mae']:.2f}")
         out(f"  RMSE  {summary['rmse']:.2f}")

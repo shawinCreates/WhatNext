@@ -14,6 +14,7 @@ const LINKS: { href: string; label: string; icon: IconName }[] = [
   { href: "/anime", label: "Anime", icon: "sparkles" },
   { href: "/watched", label: "Watched", icon: "history" },
   { href: "/favorites", label: "Favorites", icon: "star" },
+  { href: "/taste/pair", label: "Compare", icon: "sparkles" },
 ];
 
 function NavLinks({ pathname, centered = false }: { pathname: string; centered?: boolean }) {
